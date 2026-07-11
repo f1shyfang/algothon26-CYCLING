@@ -62,6 +62,15 @@ class TestDefaultOffInvariance(unittest.TestCase):
         cand = evaluate(self.prc, Params(mpairs_weight=0.0, mpairs_lookback=80))
         self.assertAlmostEqual(cand.score, base.score, places=2)
 
+    def test_inactive_mpairs_does_not_dilute_baseline(self):
+        # High min_corr selects no pairs on this dataset; gated blend must not dilute.
+        base = evaluate(self.prc, Params())
+        cand = evaluate(
+            self.prc,
+            Params(mpairs_weight=0.10, mpairs_min_corr=0.85, mpairs_lookback=40),
+        )
+        self.assertAlmostEqual(cand.score, base.score, places=2)
+
     def test_production_baseline_score(self):
         base = evaluate(self.prc, Params())
         self.assertAlmostEqual(base.score, 265.18, places=2)
