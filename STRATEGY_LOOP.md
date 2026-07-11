@@ -622,8 +622,8 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 ### Iteration 29 (Task 8 — lead promote)
 - **Date:** 2026-07-11
 - **Hypothesis:** The Track D joint ensemble from Iteration 28 (`pairs=40@0.20z2.0` + `algoscale=3.00`) is the strongest verified promote candidate and should become production.
-- **Strategy:** No new research — confirmed `python loop.py --json` reports `promote: true` for `Params(pairs_lookback=40, pairs_weight=0.20, pairs_entry_z=2.0, algo_signal_scale=3.0)`, then ported the pairs overlay and ALGO-scale blocks from `loop.py`'s `strategy_positions` into `teamName.py`'s `getMyPosition` (kept self-contained, `numpy`-only), and moved `loop.py`'s `Params` defaults to match.
-- **Result:** `python eval.py` → Mean PL = 298.1, Sharpe = 2.33, Score = **251.70** (exact match to loop.py's simulated 251.70). All 8/8 `test_teamName.py` tests pass unchanged (`MIN_HISTORY=61` already covers `max(20, 60, 40)=60`).
+- **Strategy:** No new research — confirmed the winner was promotable (`promote: true`) via `python loop.py --json` *before* moving defaults (old baseline 211.49 vs winner `Params(pairs_lookback=40, pairs_weight=0.20, pairs_entry_z=2.0, algo_signal_scale=3.0)` at 251.70). Ported the pairs overlay and ALGO-scale blocks from `loop.py`'s `strategy_positions` into `teamName.py`'s `getMyPosition` (kept self-contained, `numpy`-only), then synced `loop.py`'s `Params` defaults to match the winner.
+- **Result:** `python eval.py` → Mean PL = 298.1, Sharpe = 2.33, Score = **251.70** (exact match to loop.py's simulated 251.70). All 8/8 `test_teamName.py` tests pass unchanged (`MIN_HISTORY=61` already covers `max(20, 60, 40)=60`). After syncing `Params` defaults, `python loop.py --json` correctly reports `promote: false` because baseline and winner are now the same strategy.
 - **Decision:** KEEP & HARDEN
 - **Learnings:** Ensemble promotion required no test changes since the pairs lookback (40) never exceeds the existing regime long-window requirement (60). New production baseline **251.70** (was 211.49, +40.21). Next: resume parallel tracks against this new floor.
 
