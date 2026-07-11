@@ -131,12 +131,14 @@ class Params:
         ols = (
             f" ols={self.ols_lookback}@{self.ols_weight:.2f}"
             f"z{self.ols_entry_z:.2f}"
+            f"{'+int' if self.ols_intercept else ''}"
             if self.ols_weight > 0
             else ""
         )
         mpairs = (
             f" mpairs={self.mpairs_lookback}@{self.mpairs_weight:.2f}"
             f"k{self.mpairs_top_k}z{self.mpairs_entry_z:.2f}"
+            f"c{self.mpairs_min_corr:.2f}"
             if self.mpairs_weight > 0
             else ""
         )
