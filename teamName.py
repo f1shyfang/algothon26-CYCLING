@@ -9,6 +9,12 @@ REGIME_VOL_SHORT = 10
 REGIME_VOL_LONG = 60
 REGIME_THRESHOLD = 1.15
 REGIME_SCALE = 0.22
+# Track B: ALGO-vs-basket pairs overlay (promoted from loop.py sweep)
+PAIRS_LOOKBACK = 40
+PAIRS_WEIGHT = 0.20
+PAIRS_ENTRY_Z = 2.0
+# Track C: ALGO-specific exposure multiplier (promoted from loop.py sweep)
+ALGO_SIGNAL_SCALE = 3.0
 
 _current_positions = np.zeros(0, dtype=int)
 _last_history = np.zeros((0, 0))
@@ -18,7 +24,7 @@ def getMyPosition(prcSoFar):
     global _current_positions, _last_history
 
     nins, nt = prcSoFar.shape
-    longest_lookback = max(max(LOOKBACKS), REGIME_VOL_LONG)
+    longest_lookback = max(max(LOOKBACKS), REGIME_VOL_LONG, PAIRS_LOOKBACK)
 
     same_history = _last_history.shape == prcSoFar.shape and np.array_equal(
         _last_history,
@@ -51,6 +57,22 @@ def getMyPosition(prcSoFar):
             volatility, VOLATILITY_FLOOR
         )
         signal -= np.clip(standardized_return, -1.0, 1.0) / len(LOOKBACKS)
+
+    # Track B: ALGO-vs-basket residual (equal-weight basket of instruments 1..n)
+    basket = np.nanmean(log_prices[1:, :], axis=0)
+    algo_log_price = log_prices[0, :]
+    spread = algo_log_price - basket
+    spread_mean = spread[-PAIRS_LOOKBACK:].mean()
+    spread_std = spread[-PAIRS_LOOKBACK:].std() + VOLATILITY_FLOOR
+    z = (spread[-1] - spread_mean) / spread_std
+    if abs(z) >= PAIRS_ENTRY_Z:
+        pair_signal = np.zeros(nins)
+        pair_signal[0] = -np.clip(z, -1.0, 1.0)
+        pair_signal[1:] = -pair_signal[0] / (nins - 1)
+        signal = (1.0 - PAIRS_WEIGHT) * signal + PAIRS_WEIGHT * pair_signal
+
+    # Track C: scale up ALGO's own exposure relative to the rest of the basket
+    signal[0] *= ALGO_SIGNAL_SCALE
 
     short_vol = daily_returns[:, -REGIME_VOL_SHORT:].std(axis=1)
     long_vol = daily_returns[:, -REGIME_VOL_LONG:].std(axis=1)

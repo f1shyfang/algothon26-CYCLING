@@ -67,12 +67,12 @@ class Params:
     xs_lookback: int = 5
     xs_weight: float = 0.0  # 0 => disabled
     xs_include_algo: bool = False
-    # Track B: ALGO-vs-basket residual (simple pairs proxy; default off)
-    pairs_lookback: int = 20
-    pairs_weight: float = 0.0  # 0 => disabled
-    pairs_entry_z: float = 1.5
-    # Track C: ALGO-specific exposure multiplier (1.0 => production)
-    algo_signal_scale: float = 1.0
+    # Track B: ALGO-vs-basket residual (simple pairs proxy; production: on)
+    pairs_lookback: int = 40
+    pairs_weight: float = 0.20  # 0 => disabled
+    pairs_entry_z: float = 2.0
+    # Track C: ALGO-specific exposure multiplier (1.0 => off; production: 3.0)
+    algo_signal_scale: float = 3.0
     # Optional: hedge basket beta with ALGO (0 => off)
     algo_hedge_weight: float = 0.0
 
