@@ -232,6 +232,7 @@ python eval.py
 | 21 | Micro band×scale (promoted) | band=0.195, scale=0.32 | 252.8 | 1870.79 | 2.14 | 207.37 | 32,528,860 | Local micro-grid; train dipped slightly (9.2→8.7) but half2 rose |
 | 22 | Signal EMA blend (rejected) | ema alpha 0.50–0.90 | — | — | 1.96 | 179.32 | — | Smoothing helped train at low alpha but cut official score ≥13%; band already damps churn |
 | 23 | Deeper regime cut (promoted) | scale 0.32 → 0.22 | 255.7 | 1848.61 | 2.19 | 211.49 | 32,534,905 | ±30% sweep: deeper cut raises half2/train; still not a plateau |
+| 24 | Track A xs overlay (rejected) | xs 10d@20% demean blend (+algo best) | 222.4 | — | 2.22 | 185.00 | 28,248,637 | All 8 xs variants scored 154.64–185.00 vs baseline 211.49; promote false |
 
 ---
 
@@ -572,6 +573,14 @@ Use this section to document each pass through the loop:
 - **Result:** Winner scale=0.22 → Mean PL = 255.7, Sharpe = 2.19, Score = 211.49 (half2=146.8, train=10.2). `promote: true` (+4.12). eval.py matched; tests pass.
 - **Decision:** KEEP & HARDEN
 - **Learnings:** Still not a plateau — deeper high-vol cuts keep winning. Band/threshold/lookback neighbours did not promote. New baseline **211.49**. Next: fine-tune scale around 0.22 (0.15–0.28).
+
+### Iteration 25 (Track A tick 1)
+- **Date:** 2026-07-11
+- **Hypothesis:** Cross-sectional demean overlay — blend 80–90% time-series reversal with 10–20% cross-sectional 5d/10d reversal (with/without ALGO); relative winners revert across the universe.
+- **Strategy:** Added `xs_lookback` / `xs_weight` / `xs_include_algo` Params (default off). Grid: lookbacks {5,10} × weights {0.10,0.20} × include_algo {false,true}. Production unchanged (`xs_weight=0.0` reproduces 211.49 exactly).
+- **Result:** Best xs=10@0.20+algo → Score = 185.00 (half1=223.2, half2=147.1, train=7.1). Baseline 211.49. All 8 variants scored 154.64–185.00. `promote: false`.
+- **Decision:** DISCARD
+- **Learnings:** Demean+std cross-sectional overlay consistently drags official score vs pure time-series reversal (~12–27% loss even at 10% blend weight). Signal appears redundant with / noisier than existing per-instrument vol-standardised reversal — do not repeat this exact setup. Prior H3 rank overlay (iter 7, score 127.22) was similarly weak. Next Track A tick: try rank-based xs or much smaller blend weight (≤0.05), not demean+std at 10–20%.
 
 ---
 
