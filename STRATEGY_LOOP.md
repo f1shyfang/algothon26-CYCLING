@@ -645,6 +645,15 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** HOLD — PROMOTABLE-held; **not** copied into `teamName.py` per Task 3 instructions.
 - **Learnings:** Short lookback (30) + moderate weight (0.20) + looser entry (z=1.5) dominates replace mode; OLS β estimation appears to add real edge over β≈1 pairs when pairs are turned off. Next L1 tick: fine-tune around lb=30 / w=0.20 / z=1.5 (and maybe keep additive as a secondary arm).
 
+### Iteration 32 (Track L2 tick 1 — multi-pair OLS)
+
+- **Date:** 2026-07-12
+- **Hypothesis:** Top-k corr-screened instrument pairs (ex-ALGO), OLS hedge + z-entry, blended modestly onto the production floor should add orthogonal mean-reversion edge.
+- **Strategy:** Wired `_mpairs_signal` + `mpairs_*` overlay in `strategy_positions` (default off). Grid: lb∈{40,60} × top_k∈{3,5} × weight∈{0.10,0.20} × entry_z∈{2.0,2.5} × min_corr∈{0.85,0.90} (32 candidates + floor). Production `pairs_weight` / `algo_signal_scale` left at defaults; `ols_weight` stays 0.
+- **Result:** Best L2 = mpairs=40@0.10k3z2.00c0.85 → Score = **221.94** (half1=297.19, half2=146.21, train=21.55). Baseline **251.70**. All weight=0.10 candidates tied at 221.94; all weight=0.20 tied at 206.48 — lb/k/z/corr had no effect. `promote: false`.
+- **Decision:** HOLD floor — reject; **not** copied into `teamName.py`.
+- **Learnings:** Overlay looks inert at this entry threshold (scores scale only with blend weight, consistent with near-zero pair signals diluting the base). Next L2 tick: lower `mpairs_entry_z` (e.g. 1.0–1.5), loosen `mpairs_min_corr`, and/or diagnose active-pair counts before expanding the grid.
+
 ---
 
 > [!NOTE]

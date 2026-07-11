@@ -177,6 +177,56 @@ def spread_z(spread: np.ndarray, lb: int) -> float:
     return (float(window[-1]) - mu) / sd
 
 
+def _mpairs_signal(
+    log_prices: np.ndarray,
+    daily_returns: np.ndarray,
+    params: Params,
+) -> np.ndarray:
+    """Corr-screened top-k pair OLS residual signals (instruments 1..n-1)."""
+    nins = log_prices.shape[0]
+    lb = params.mpairs_lookback
+    sig = np.zeros(nins)
+    # Use log returns over lookback for correlation screen
+    rets = daily_returns[1:, -lb:]  # exclude ALGO (index 0)
+    n = rets.shape[0]
+    if n < 2 or lb < 3:
+        return sig
+    # Pairwise abs corr
+    candidates: list[tuple[float, int, int]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = rets[i], rets[j]
+            if a.std() < VOLATILITY_FLOOR or b.std() < VOLATILITY_FLOOR:
+                continue
+            corr = float(np.corrcoef(a, b)[0, 1])
+            if abs(corr) >= params.mpairs_min_corr:
+                candidates.append((abs(corr), i + 1, j + 1))  # map back to instrument idx
+    candidates.sort(reverse=True)
+    chosen = candidates[: params.mpairs_top_k]
+    if not chosen:
+        return sig
+    active = 0
+    for _, i, j in chosen:
+        yi = log_prices[i, :]
+        xj = log_prices[j, :]
+        beta = rolling_ols_beta(yi, xj, lb, intercept=False)
+        spread = yi - beta * xj
+        z = spread_z(spread, lb)
+        if abs(z) < params.mpairs_entry_z:
+            continue
+        zc = float(np.clip(z, -params.signal_clip, params.signal_clip))
+        # Mean-revert: short spread if z>0 → short i, long j * beta
+        sig[i] += -zc
+        sig[j] += zc * beta
+        active += 1
+    if active == 0:
+        return np.zeros(nins)
+    sig /= active
+    # Renormalise so max abs <= signal_clip
+    m = np.max(np.abs(sig)) + VOLATILITY_FLOOR
+    return np.clip(sig / m, -params.signal_clip, params.signal_clip) * params.signal_clip
+
+
 # ── Parameterised strategy (a pure function of history + previous positions) ──
 def _reversal_signal(prc_so_far: np.ndarray, params: Params) -> np.ndarray:
     """Vol-standardised multi-horizon reversal (+ optional momentum) signal."""
@@ -236,6 +286,8 @@ def strategy_positions(
         longest = max(longest, params.pairs_lookback)
     if params.ols_weight > 0:
         longest = max(longest, params.ols_lookback)
+    if params.mpairs_weight > 0:
+        longest = max(longest, params.mpairs_lookback)
     min_days = longest + 1 if params.signal_ema_alpha < 1.0 else longest
 
     if nt <= min_days:
@@ -256,6 +308,8 @@ def strategy_positions(
         need = max(need, params.pairs_lookback)
     if params.ols_weight > 0:
         need = max(need, params.ols_lookback)
+    if params.mpairs_weight > 0:
+        need = max(need, params.mpairs_lookback)
     recent = prc_so_far[:, -(need + 1):]
     log_prices = np.log(recent)
     daily_returns = np.diff(log_prices, axis=1)
@@ -303,6 +357,10 @@ def strategy_positions(
             ols_sig[0] = -np.clip(z, -params.signal_clip, params.signal_clip)
             ols_sig[1:] = -ols_sig[0] / (nins - 1)
             signal = (1.0 - params.ols_weight) * signal + params.ols_weight * ols_sig
+
+    if params.mpairs_weight > 0 and nt > params.mpairs_lookback:
+        mp = _mpairs_signal(log_prices, daily_returns, params)
+        signal = (1.0 - params.mpairs_weight) * signal + params.mpairs_weight * mp
 
     if params.algo_signal_scale != 1.0:
         signal = signal.copy()
@@ -474,28 +532,20 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 
 # ── The loop: sweep, log, leaderboard, promote ────────────────────────────────
 def build_grid() -> list[Params]:
-    """Track L1: rolling OLS ALGO-basket. Prefer replace mode (pairs_weight=0)."""
-    grid = [Params()]  # production floor
-    # Replace mode: turn off β≈1 pairs, put weight on ols_*
-    for lb in (30, 40, 60):
-        for w in (0.10, 0.20, 0.30):
-            for z in (1.5, 2.0, 2.5):
-                grid.append(Params(
-                    pairs_weight=0.0,
-                    ols_lookback=lb,
-                    ols_weight=w,
-                    ols_entry_z=z,
-                    ols_intercept=False,
-                ))
-    # Additive smoke: keep production pairs, add one OLS candidate
-    grid.append(Params(
-        ols_lookback=40, ols_weight=0.10, ols_entry_z=2.0, ols_intercept=False,
-    ))
-    # Intercept variant (replace)
-    grid.append(Params(
-        pairs_weight=0.0,
-        ols_lookback=40, ols_weight=0.20, ols_entry_z=2.0, ols_intercept=True,
-    ))
+    """Track L2: multi-pair OLS. Production pairs/scale left at defaults."""
+    grid = [Params()]
+    for lb in (40, 60):
+        for k in (3, 5):
+            for w in (0.10, 0.20):
+                for z in (2.0, 2.5):
+                    for cmin in (0.85, 0.90):
+                        grid.append(Params(
+                            mpairs_lookback=lb,
+                            mpairs_weight=w,
+                            mpairs_top_k=k,
+                            mpairs_entry_z=z,
+                            mpairs_min_corr=cmin,
+                        ))
     return grid
 
 
