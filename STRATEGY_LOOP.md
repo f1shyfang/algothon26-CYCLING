@@ -627,6 +627,15 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** KEEP & HARDEN
 - **Learnings:** Ensemble promotion required no test changes since the pairs lookback (40) never exceeds the existing regime long-window requirement (60). New production baseline **251.70** (was 211.49, +40.21). Next: resume parallel tracks against this new floor.
 
+### Iteration 30 (Task 9 — Day 4 freeze, stress, submit prep)
+
+- **Date:** 2026-07-11
+- **Hypothesis:** The Iteration 29 promote (score 251.70) remains correct and submission-ready under an independent final audit; no signal change is warranted unless a check fails.
+- **Strategy:** No parameter or signal change. Froze `teamName.py`; ran the full contract audit (`python -m unittest test_teamName.py -v`, `python eval.py`, import grep); ran a quick synthetic ±5% overnight-gap smoke test (finite/integer output, dollar-limit compliance) since the ensemble's pairs/ALGO-scale blocks were new since the last gap stress (Iteration 9, pre-ensemble); reaffirmed the prior 2×/5× commission-stress finding qualitatively (rebalance band + event-triggered pairs entry keep turnover in check, no re-run needed since signal logic didn't change). Created `docs/tracks/SUBMIT.md` with the full Day-4 checklist and 16 Jul restart playbook, and copied `teamName.py` → `CYCLING.py` as the registered-team-name submission file (folder is `algothon26-CYCLING`).
+- **Result:** All 8/8 tests pass; `eval.py` → Mean PL = 298.1, Sharpe = 2.33, Score = **251.70** (exact match, no drift); only `import numpy as np` present; output shape `(51,)`, integer dtype, finite, within $100K (ALGO) / $10K (others) dollar limits — verified directly against `prices.txt`, not just via `eval.py`'s own clipping. Gap smoke test: finite/integer and within limits for both +5% and -5% shocks. `CYCLING.py` confirmed byte-identical to `teamName.py` and independently runnable.
+- **Decision:** KEEP & HARDEN (freeze holds; no code change)
+- **Learnings:** No regressions found — the Day-3 ensemble promote is robust to a fresh gap-shock smoke test and passes every submission-contract check. Baseline stays **251.70**. Ready for submission per `docs/tracks/SUBMIT.md`, though no leaderboard submission was made by this task. Next: if resuming research before the 16 Jul General Round data drops, restart parallel tracks per `docs/tracks/PROTOCOL.md`'s Day-4 freeze note; on 16 Jul, follow `docs/tracks/SUBMIT.md` §6's restart playbook.
+
 ---
 
 > [!NOTE]

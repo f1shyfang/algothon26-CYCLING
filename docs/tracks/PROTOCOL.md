@@ -183,3 +183,28 @@ optimum; if it still passes robustness guards (`half2`/`train` intact) at
 the new optimum, promote **C**. Track B's candidate is already a
 fully-screened local result from its tick-1 grid and remains the safer
 near-term promote if a decision is needed before C's Day-2 tick completes.
+
+---
+
+## Day-4 freeze (Task 9)
+
+**Status: FROZEN for submission.** Both held candidates above (Track B,
+Track C) were superseded by the Track D ensemble (Iteration 28) and
+promoted to production by the lead (Iteration 29) *before* Day 4 began —
+see `STRATEGY_LOOP.md` Iterations 28–29. Production baseline entering
+Day 4 is **251.70** (pairs=40@0.20z2.0 + algo_signal_scale=3.0 on top of
+the Day-2 band/regime floor), not the 211.49/228.65/219.30 figures
+referenced earlier in this document, which are now historical.
+
+Day-4 rules in effect:
+
+- No new strategy families (Task 9 Step 1). Track agents stop taking new
+  ticks; `teamName.py` signal logic does not change unless a test fails.
+- Stress checks and the submission contract audit are research/verification
+  only — see `docs/tracks/SUBMIT.md` for the full Day-4 checklist and
+  results (8/8 tests pass, `eval.py` score = 251.70, only `numpy`
+  imported, signature/shape/limits verified directly).
+- Submission packaging (`CYCLING.py`, the registered-team-name copy of
+  `teamName.py`) is prepared but **not submitted** to the live
+  leaderboard by this task — see `docs/tracks/SUBMIT.md` §5 for the
+  submit procedure and §6 for the 16 Jul General Round restart playbook.
