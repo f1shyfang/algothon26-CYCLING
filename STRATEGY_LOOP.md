@@ -652,7 +652,7 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Strategy:** Wired `_mpairs_signal` + `mpairs_*` overlay in `strategy_positions` (default off). Grid: lb∈{40,60} × top_k∈{3,5} × weight∈{0.10,0.20} × entry_z∈{2.0,2.5} × min_corr∈{0.85,0.90} (32 candidates + floor). Production `pairs_weight` / `algo_signal_scale` left at defaults; `ols_weight` stays 0.
 - **Result:** Best L2 = mpairs=40@0.10k3z2.00c0.85 → Score = **221.94** (half1=297.19, half2=146.21, train=21.55). Baseline **251.70**. All weight=0.10 candidates tied at 221.94; all weight=0.20 tied at 206.48 — lb/k/z/corr had no effect. `promote: false`.
 - **Decision:** HOLD floor — reject; **not** copied into `teamName.py`.
-- **Learnings:** Overlay looks inert at this entry threshold (scores scale only with blend weight, consistent with near-zero pair signals diluting the base). Next L2 tick: lower `mpairs_entry_z` (e.g. 1.0–1.5), loosen `mpairs_min_corr`, and/or diagnose active-pair counts before expanding the grid.
+- **Learnings:** Primary root cause was `mpairs_min_corr` (0.85/0.90) above empirical max pairwise corr on this data (~0.77 at lb=40) — tick-1 grid never selected pairs. Score collapse was pure dilution from the ungated blend (always mixing zero overlay into base), not merely entry_z. (Blend now gated when overlay inactive.) Next L2 tick: loosen `mpairs_min_corr` (e.g. ≤0.70), optionally lower `mpairs_entry_z` (1.0–1.5), and confirm active-pair counts before expanding the grid.
 
 ---
 

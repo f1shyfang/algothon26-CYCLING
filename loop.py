@@ -360,7 +360,8 @@ def strategy_positions(
 
     if params.mpairs_weight > 0 and nt > params.mpairs_lookback:
         mp = _mpairs_signal(log_prices, daily_returns, params)
-        signal = (1.0 - params.mpairs_weight) * signal + params.mpairs_weight * mp
+        if np.any(np.abs(mp) > VOLATILITY_FLOOR):
+            signal = (1.0 - params.mpairs_weight) * signal + params.mpairs_weight * mp
 
     if params.algo_signal_scale != 1.0:
         signal = signal.copy()
