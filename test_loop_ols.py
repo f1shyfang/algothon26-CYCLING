@@ -1,0 +1,64 @@
+"""Unit tests for loop.py OLS helpers and default-off invariance."""
+import unittest
+
+import numpy as np
+
+from loop import (
+    Params,
+    evaluate,
+    load_prices,
+    rolling_ols_beta,
+    spread_z,
+    VOLATILITY_FLOOR,
+)
+
+
+class TestRollingOlsBeta(unittest.TestCase):
+    def test_known_slope_no_intercept(self):
+        x = np.arange(10, dtype=float)
+        y = 2.5 * x
+        beta = rolling_ols_beta(y, x, lb=10, intercept=False)
+        self.assertAlmostEqual(beta, 2.5, places=6)
+
+    def test_known_slope_with_intercept(self):
+        x = np.arange(10, dtype=float)
+        y = 3.0 + 1.5 * x
+        beta = rolling_ols_beta(y, x, lb=10, intercept=True)
+        self.assertAlmostEqual(beta, 1.5, places=5)
+
+    def test_uses_only_last_lb(self):
+        x = np.concatenate([np.zeros(5), np.arange(5, dtype=float)])
+        y = np.concatenate([np.ones(5) * 100, 2.0 * np.arange(5, dtype=float)])
+        beta = rolling_ols_beta(y, x, lb=5, intercept=False)
+        self.assertAlmostEqual(beta, 2.0, places=6)
+
+
+class TestSpreadZ(unittest.TestCase):
+    def test_zero_at_mean(self):
+        s = np.ones(20)
+        self.assertAlmostEqual(spread_z(s, 20), 0.0, places=6)
+
+    def test_positive_when_last_high(self):
+        s = np.zeros(20)
+        s[-1] = 5.0
+        z = spread_z(s, 20)
+        self.assertGreater(z, 0.0)
+
+
+class TestDefaultOffInvariance(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.prc = load_prices()
+        cls.base = evaluate(cls.prc, Params())
+
+    def test_ols_weight_zero_matches_baseline(self):
+        cand = evaluate(self.prc, Params(ols_weight=0.0, ols_lookback=40))
+        self.assertAlmostEqual(cand.score, self.base.score, places=2)
+
+    def test_mpairs_weight_zero_matches_baseline(self):
+        cand = evaluate(self.prc, Params(mpairs_weight=0.0, mpairs_lookback=60))
+        self.assertAlmostEqual(cand.score, self.base.score, places=2)
+
+
+if __name__ == "__main__":
+    unittest.main()

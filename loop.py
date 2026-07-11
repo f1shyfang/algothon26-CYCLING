@@ -75,6 +75,17 @@ class Params:
     algo_signal_scale: float = 3.0
     # Optional: hedge basket beta with ALGO (0 => off)
     algo_hedge_weight: float = 0.0
+    # Track L1: rolling OLS ALGO-vs-basket (default off)
+    ols_lookback: int = 40
+    ols_weight: float = 0.0
+    ols_entry_z: float = 2.0
+    ols_intercept: bool = False
+    # Track L2: multi-pair OLS (default off)
+    mpairs_lookback: int = 60
+    mpairs_weight: float = 0.0
+    mpairs_top_k: int = 5
+    mpairs_entry_z: float = 2.0
+    mpairs_min_corr: float = 0.85
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)
@@ -117,11 +128,51 @@ class Params:
             if self.algo_hedge_weight > 0
             else ""
         )
+        ols = (
+            f" ols={self.ols_lookback}@{self.ols_weight:.2f}"
+            f"z{self.ols_entry_z:.2f}"
+            if self.ols_weight > 0
+            else ""
+        )
+        mpairs = (
+            f" mpairs={self.mpairs_lookback}@{self.mpairs_weight:.2f}"
+            f"k{self.mpairs_top_k}z{self.mpairs_entry_z:.2f}"
+            if self.mpairs_weight > 0
+            else ""
+        )
         return (
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
             f"{clip}{mom}{regime}{ema}{xs}{pairs}{algo_scale}{algo_hedge}"
+            f"{ols}{mpairs}"
         )
+
+
+def rolling_ols_beta(
+    y: np.ndarray,
+    x: np.ndarray,
+    lb: int,
+    intercept: bool = False,
+) -> float:
+    """Least-squares slope of y on x using the last lb observations."""
+    yy = np.asarray(y[-lb:], dtype=float)
+    xx = np.asarray(x[-lb:], dtype=float)
+    if intercept:
+        X = np.column_stack([np.ones(lb), xx])
+        coef, _, _, _ = np.linalg.lstsq(X, yy, rcond=None)
+        return float(coef[1])
+    denom = float(xx @ xx)
+    if denom < VOLATILITY_FLOOR:
+        return 0.0
+    return float(xx @ yy) / denom
+
+
+def spread_z(spread: np.ndarray, lb: int) -> float:
+    """Z-score of the last point vs the last lb window."""
+    window = np.asarray(spread[-lb:], dtype=float)
+    mu = float(window.mean())
+    sd = float(window.std()) + VOLATILITY_FLOOR
+    return (float(window[-1]) - mu) / sd
 
 
 # ── Parameterised strategy (a pure function of history + previous positions) ──
