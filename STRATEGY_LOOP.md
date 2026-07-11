@@ -582,6 +582,14 @@ Use this section to document each pass through the loop:
 - **Decision:** DISCARD
 - **Learnings:** Demean+std cross-sectional overlay consistently drags official score vs pure time-series reversal (~12–27% loss even at 10% blend weight). Signal appears redundant with / noisier than existing per-instrument vol-standardised reversal — do not repeat this exact setup. Prior H3 rank overlay (iter 7, score 127.22) was similarly weak. Next Track A tick: try rank-based xs or much smaller blend weight (≤0.05), not demean+std at 10–20%.
 
+### Iteration 26 (Track B tick 1)
+- **Date:** 2026-07-11
+- **Hypothesis:** ALGO's price minus an equal-weight basket of the other 50 instruments is a mean-reverting spread; a z-score entry filter on that residual should add orthogonal alpha to the per-instrument reversal signal.
+- **Strategy:** Added `pairs_lookback` / `pairs_weight` / `pairs_entry_z` Params (default off). Grid: lookback {20,40} × weight {0.10,0.20} × entry-z {1.0,1.5,2.0}. Production unchanged (`pairs_weight=0.0` reproduces 211.49 exactly).
+- **Result:** Best pairs=40@0.20z2.0 → Score = 219.30 (half1=289.97, half2=148.12, train=11.11). Baseline 211.49. `promote: true` (+7.81) per `is_promotable`. eval.py-equivalent tests still pass (8/8); loop.py `--sweep`/`--json` agree.
+- **Decision:** HOLD — logged as promotable but **not** copied into `teamName.py` per Task 4 instructions (track isolation; coordinator reconciles A/B/C/D before any production change).
+- **Learnings:** Wide entry-z (2.0) + larger blend weight (0.20) dominates: rare, strongly-stretched ALGO-vs-basket divergences carry real signal, while tighter thresholds (z=1.0–1.5) fire on noise and underperform baseline. This is a genuinely different signal family from Track A's cross-sectional demean overlay (which uniformly hurt). Next Track B tick: fine-tune around lookback=40/weight=0.20/entry-z=2.0 (e.g. z∈{1.8,2.0,2.5}, weight∈{0.15,0.25,0.30}) and re-check robustness guards don't degrade further out.
+
 ---
 
 > [!NOTE]

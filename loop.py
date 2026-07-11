@@ -67,6 +67,10 @@ class Params:
     xs_lookback: int = 5
     xs_weight: float = 0.0  # 0 => disabled
     xs_include_algo: bool = False
+    # Track B: ALGO-vs-basket residual (simple pairs proxy; default off)
+    pairs_lookback: int = 20
+    pairs_weight: float = 0.0  # 0 => disabled
+    pairs_entry_z: float = 1.5
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)
@@ -93,10 +97,16 @@ class Params:
             if self.xs_weight > 0
             else ""
         )
+        pairs = (
+            f" pairs={self.pairs_lookback}@{self.pairs_weight:.2f}"
+            f"z{self.pairs_entry_z:.2f}"
+            if self.pairs_weight > 0
+            else ""
+        )
         return (
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
-            f"{clip}{mom}{regime}{ema}{xs}"
+            f"{clip}{mom}{regime}{ema}{xs}{pairs}"
         )
 
 
@@ -155,6 +165,8 @@ def strategy_positions(
         longest = max(longest, params.regime_vol_long)
     if params.xs_weight > 0:
         longest = max(longest, params.xs_lookback)
+    if params.pairs_weight > 0:
+        longest = max(longest, params.pairs_lookback)
     min_days = longest + 1 if params.signal_ema_alpha < 1.0 else longest
 
     if nt <= min_days:
@@ -171,6 +183,8 @@ def strategy_positions(
         need = max(need, params.regime_vol_long)
     if params.xs_weight > 0:
         need = max(need, params.xs_lookback)
+    if params.pairs_weight > 0:
+        need = max(need, params.pairs_lookback)
     recent = prc_so_far[:, -(need + 1):]
     log_prices = np.log(recent)
     daily_returns = np.diff(log_prices, axis=1)
@@ -190,6 +204,21 @@ def strategy_positions(
             sd = np.std(xs_signal) + VOLATILITY_FLOOR
             xs_signal = np.clip(xs_signal / sd, -params.signal_clip, params.signal_clip)
             signal = (1.0 - params.xs_weight) * signal + params.xs_weight * xs_signal
+
+    if params.pairs_weight > 0 and nt > params.pairs_lookback:
+        lb = params.pairs_lookback
+        # Equal-weight basket of instruments 1..n (ex-ALGO)
+        basket = np.nanmean(log_prices[1:, :], axis=0)
+        algo = log_prices[0, :]
+        spread = algo - basket
+        mu_s = spread[-lb:].mean()
+        sd_s = spread[-lb:].std() + VOLATILITY_FLOOR
+        z = (spread[-1] - mu_s) / sd_s
+        if abs(z) >= params.pairs_entry_z:
+            pair_sig = np.zeros(nins)
+            pair_sig[0] = -np.clip(z, -params.signal_clip, params.signal_clip)
+            pair_sig[1:] = -pair_sig[0] / (nins - 1)
+            signal = (1.0 - params.pairs_weight) * signal + params.pairs_weight * pair_sig
 
     dollar_limits = np.full(nins, params.default_dollar_limit, dtype=float)
     dollar_limits[0] = params.algo_dollar_limit
@@ -354,10 +383,10 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 def build_grid() -> list[Params]:
     """Candidate parameter sets to explore around the production strategy."""
     grid: list[Params] = [Params()]
-    # Track A screen (xs overlay)
-    for lb, w in ((5, 0.10), (5, 0.20), (10, 0.10), (10, 0.20)):
-        grid.append(Params(xs_lookback=lb, xs_weight=w))
-        grid.append(Params(xs_lookback=lb, xs_weight=w, xs_include_algo=True))
+    # Track B screen (ALGO-vs-basket residual overlay)
+    for w, z in ((0.10, 1.0), (0.10, 1.5), (0.20, 1.5), (0.20, 2.0)):
+        grid.append(Params(pairs_weight=w, pairs_entry_z=z, pairs_lookback=20))
+        grid.append(Params(pairs_weight=w, pairs_entry_z=z, pairs_lookback=40))
     return grid
 
 
