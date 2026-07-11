@@ -654,6 +654,15 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** HOLD floor — reject; **not** copied into `teamName.py`.
 - **Learnings:** Primary root cause was `mpairs_min_corr` (0.85/0.90) above empirical max pairwise corr on this data (~0.77 at lb=40) — tick-1 grid never selected pairs. Score collapse was pure dilution from the ungated blend (always mixing zero overlay into base), not merely entry_z. (Blend now gated when overlay inactive.) Next L2 tick: loosen `mpairs_min_corr` (e.g. ≤0.70), optionally lower `mpairs_entry_z` (1.0–1.5), and confirm active-pair counts before expanding the grid.
 
+### Iteration 33 (Task 6 — promote L1 OLS replace)
+
+- **Date:** 2026-07-12
+- **Hypothesis:** Midday merge of Wave 2 tick-1: L1 replace winner (265.18, half2=211.35, promote true) vs L2 (221.94, promote false) → promote exactly one = L1; skip Task 7 ensemble.
+- **Strategy:** Ported OLS ALGO-basket replace into `teamName.py` (numpy helpers + overlay; removed production pairs). Synced `loop.py` `Params` defaults: `pairs_weight=0`, `ols_lookback=30`, `ols_weight=0.20`, `ols_entry_z=1.5`, `ols_intercept=False`, `algo_signal_scale=3.0`. `build_grid()` → `[Params()]` floor check. Copied `teamName.py` → `CYCLING.py`.
+- **Result:** `python eval.py` → Score = **265.18**; `loop.py` Params() → **265.18**; `loop.py --json` → `promote: false` (baseline = winner). Tests pass.
+- **Decision:** PROMOTED. New production floor **265.18**.
+- **Learnings:** OLS β replace dominates equal-weight pairs on this data; L2 too weak for ensemble. Next research should start from the OLS floor.
+
 ---
 
 > [!NOTE]

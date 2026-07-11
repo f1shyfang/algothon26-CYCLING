@@ -227,5 +227,8 @@ Prior tracks A/B/C/D are historical — do not reopen rejected hypotheses.
 **Wave 2 tick-1 status (for lead):**
 | Track | Best official | half2 | promote? |
 |:---|---:|---:|:---|
-| L1 | 265.18 | 211.35 | true (HOLD pending Task 6) |
+| L1 | 265.18 | 211.35 | **PROMOTED** (Task 6 — ols=30@0.20z1.5 replace) |
 | L2 | 221.94 | 146.21 | false (corr floor too high; blend gate fixed) |
+
+**Post-Task-6 floor:** **265.18**. Task 7 ensemble skipped (L2 weak). `Params()` /
+`teamName.py` now use OLS replace (`pairs_weight=0`, `ols_weight=0.20`).

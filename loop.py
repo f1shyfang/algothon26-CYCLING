@@ -67,18 +67,18 @@ class Params:
     xs_lookback: int = 5
     xs_weight: float = 0.0  # 0 => disabled
     xs_include_algo: bool = False
-    # Track B: ALGO-vs-basket residual (simple pairs proxy; production: on)
+    # Track B: ALGO-vs-basket residual (simple pairs proxy; replaced by ols)
     pairs_lookback: int = 40
-    pairs_weight: float = 0.20  # 0 => disabled
+    pairs_weight: float = 0.0  # replaced by ols
     pairs_entry_z: float = 2.0
     # Track C: ALGO-specific exposure multiplier (1.0 => off; production: 3.0)
-    algo_signal_scale: float = 3.0
+    algo_signal_scale: float = 3.0  # unchanged
     # Optional: hedge basket beta with ALGO (0 => off)
     algo_hedge_weight: float = 0.0
-    # Track L1: rolling OLS ALGO-vs-basket (default off)
-    ols_lookback: int = 40
-    ols_weight: float = 0.0
-    ols_entry_z: float = 2.0
+    # Track L1: rolling OLS ALGO-vs-basket (production: on, replaces pairs)
+    ols_lookback: int = 30
+    ols_weight: float = 0.20
+    ols_entry_z: float = 1.5
     ols_intercept: bool = False
     # Track L2: multi-pair OLS (default off)
     mpairs_lookback: int = 60
@@ -533,21 +533,8 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 
 # ── The loop: sweep, log, leaderboard, promote ────────────────────────────────
 def build_grid() -> list[Params]:
-    """Track L2: multi-pair OLS. Production pairs/scale left at defaults."""
-    grid = [Params()]
-    for lb in (40, 60):
-        for k in (3, 5):
-            for w in (0.10, 0.20):
-                for z in (2.0, 2.5):
-                    for cmin in (0.85, 0.90):
-                        grid.append(Params(
-                            mpairs_lookback=lb,
-                            mpairs_weight=w,
-                            mpairs_top_k=k,
-                            mpairs_entry_z=z,
-                            mpairs_min_corr=cmin,
-                        ))
-    return grid
+    """Post-promote floor: Params() is the new production baseline."""
+    return [Params()]
 
 
 def _result_fieldnames() -> list[str]:

@@ -49,15 +49,22 @@ class TestDefaultOffInvariance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.prc = load_prices()
-        cls.base = evaluate(cls.prc, Params())
 
-    def test_ols_weight_zero_matches_baseline(self):
-        cand = evaluate(self.prc, Params(ols_weight=0.0, ols_lookback=40))
-        self.assertAlmostEqual(cand.score, self.base.score, places=2)
+    def test_explicit_zero_ols_is_stable(self):
+        # Research-off path: no ols and no pairs
+        a = evaluate(self.prc, Params(ols_weight=0.0, pairs_weight=0.0))
+        b = evaluate(self.prc, Params(ols_weight=0.0, pairs_weight=0.0, ols_lookback=60))
+        self.assertAlmostEqual(a.score, b.score, places=2)
 
-    def test_mpairs_weight_zero_matches_baseline(self):
-        cand = evaluate(self.prc, Params(mpairs_weight=0.0, mpairs_lookback=60))
-        self.assertAlmostEqual(cand.score, self.base.score, places=2)
+    def test_explicit_zero_mpairs_matches_baseline(self):
+        # Production defaults now have ols on; mpairs remains off
+        base = evaluate(self.prc, Params())
+        cand = evaluate(self.prc, Params(mpairs_weight=0.0, mpairs_lookback=80))
+        self.assertAlmostEqual(cand.score, base.score, places=2)
+
+    def test_production_baseline_score(self):
+        base = evaluate(self.prc, Params())
+        self.assertAlmostEqual(base.score, 265.18, places=2)
 
 
 if __name__ == "__main__":
