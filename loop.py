@@ -28,7 +28,7 @@ import csv
 import itertools
 import json
 import os
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields
 
 import numpy as np
 import pandas as pd
@@ -405,12 +405,7 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 # ── The loop: sweep, log, leaderboard, promote ────────────────────────────────
 def build_grid() -> list[Params]:
     """Candidate parameter sets to explore around the production strategy."""
-    grid: list[Params] = [Params()]
-    # Track B screen (ALGO-vs-basket residual overlay)
-    for w, z in ((0.10, 1.0), (0.10, 1.5), (0.20, 1.5), (0.20, 2.0)):
-        grid.append(Params(pairs_weight=w, pairs_entry_z=z, pairs_lookback=20))
-        grid.append(Params(pairs_weight=w, pairs_entry_z=z, pairs_lookback=40))
-    # Track C screen (ALGO signal scale / basket-hedge weight)
+    grid = [Params()]
     for s in (0.5, 0.75, 1.25, 1.5, 2.0):
         grid.append(Params(algo_signal_scale=s))
     for h in (0.25, 0.50, 0.75, 1.0):
@@ -418,14 +413,26 @@ def build_grid() -> list[Params]:
     return grid
 
 
+def _result_fieldnames() -> list[str]:
+    """Stable CSV column order: all Params fields, then evaluation metrics."""
+    param_keys = [f.name for f in fields(Params)]
+    eval_keys = ("label", "score", "mean_pl", "sharpe", "dvol", "half1", "half2", "train", "robust")
+    return param_keys + list(eval_keys)
+
+
 def log_results(rows: list[dict], path: str) -> None:
     if not rows:
         return
-    fieldnames = list(rows[0].keys())
+    fieldnames = _result_fieldnames()
     exists = os.path.exists(path)
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not exists:
+    header_ok = False
+    if exists:
+        with open(path, newline="") as f:
+            header_ok = next(csv.reader(f), None) == fieldnames
+    mode = "a" if exists and header_ok else "w"
+    with open(path, mode, newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        if mode == "w":
             writer.writeheader()
         writer.writerows(rows)
 
