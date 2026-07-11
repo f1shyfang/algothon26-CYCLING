@@ -208,3 +208,24 @@ Day-4 rules in effect:
   `teamName.py`) is prepared but **not submitted** to the live
   leaderboard by this task — see `docs/tracks/SUBMIT.md` §5 for the
   submit procedure and §6 for the 16 Jul General Round restart playbook.
+
+---
+
+## Wave 2 — OLS / Multi-pair (L1 + L2)
+
+**Floor:** 251.70 (pairs+ALGO-scale ensemble). Spec:
+`docs/superpowers/specs/2026-07-12-ols-mpairs-tracks-design.md`
+
+| Track | Prefix | Notes |
+|:---|:---|:---|
+| L1 | `ols_*` | Prefer replace mode (`pairs_weight=0`) when sweeping |
+| L2 | `mpairs_*` | Instruments 1..50 only; corr screen; no daily cointegration |
+
+Same daily rhythm, kill rule, and lead-only promote as Wave 1.
+Prior tracks A/B/C/D are historical — do not reopen rejected hypotheses.
+
+**Wave 2 tick-1 status (for lead):**
+| Track | Best official | half2 | promote? |
+|:---|---:|---:|:---|
+| L1 | 265.18 | 211.35 | true (HOLD pending Task 6) |
+| L2 | 221.94 | 146.21 | false (corr floor too high; blend gate fixed) |
