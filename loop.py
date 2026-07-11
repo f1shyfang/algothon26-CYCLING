@@ -234,6 +234,8 @@ def strategy_positions(
         longest = max(longest, params.xs_lookback)
     if params.pairs_weight > 0:
         longest = max(longest, params.pairs_lookback)
+    if params.ols_weight > 0:
+        longest = max(longest, params.ols_lookback)
     min_days = longest + 1 if params.signal_ema_alpha < 1.0 else longest
 
     if nt <= min_days:
@@ -252,6 +254,8 @@ def strategy_positions(
         need = max(need, params.xs_lookback)
     if params.pairs_weight > 0:
         need = max(need, params.pairs_lookback)
+    if params.ols_weight > 0:
+        need = max(need, params.ols_lookback)
     recent = prc_so_far[:, -(need + 1):]
     log_prices = np.log(recent)
     daily_returns = np.diff(log_prices, axis=1)
@@ -286,6 +290,19 @@ def strategy_positions(
             pair_sig[0] = -np.clip(z, -params.signal_clip, params.signal_clip)
             pair_sig[1:] = -pair_sig[0] / (nins - 1)
             signal = (1.0 - params.pairs_weight) * signal + params.pairs_weight * pair_sig
+
+    if params.ols_weight > 0 and nt > params.ols_lookback:
+        lb = params.ols_lookback
+        basket = np.nanmean(log_prices[1:, :], axis=0)
+        algo = log_prices[0, :]
+        beta = rolling_ols_beta(algo, basket, lb, intercept=params.ols_intercept)
+        spread = algo - beta * basket
+        z = spread_z(spread, lb)
+        if abs(z) >= params.ols_entry_z:
+            ols_sig = np.zeros(nins)
+            ols_sig[0] = -np.clip(z, -params.signal_clip, params.signal_clip)
+            ols_sig[1:] = -ols_sig[0] / (nins - 1)
+            signal = (1.0 - params.ols_weight) * signal + params.ols_weight * ols_sig
 
     if params.algo_signal_scale != 1.0:
         signal = signal.copy()
@@ -457,22 +474,28 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 
 # ── The loop: sweep, log, leaderboard, promote ────────────────────────────────
 def build_grid() -> list[Params]:
-    """Track D (Day 3): joint ensemble of Track B (pairs) + Track C (algo scale)
-    survivors. Solo entries are included for direct comparison against the
-    ensemble combinations. See docs/tracks/D.md.
-    """
-    grid = [Params()]
-    # Solo survivors for comparison
-    grid.append(Params(pairs_lookback=40, pairs_weight=0.20, pairs_entry_z=2.0))
-    grid.append(Params(algo_signal_scale=2.0))
-    grid.append(Params(algo_signal_scale=3.0))
-    # Ensembles
-    for scale in (2.0, 3.0):
-        for pw, pz, plb in ((0.10, 2.0, 40), (0.20, 2.0, 40), (0.20, 2.0, 30)):
-            grid.append(Params(
-                pairs_lookback=plb, pairs_weight=pw, pairs_entry_z=pz,
-                algo_signal_scale=scale,
-            ))
+    """Track L1: rolling OLS ALGO-basket. Prefer replace mode (pairs_weight=0)."""
+    grid = [Params()]  # production floor
+    # Replace mode: turn off β≈1 pairs, put weight on ols_*
+    for lb in (30, 40, 60):
+        for w in (0.10, 0.20, 0.30):
+            for z in (1.5, 2.0, 2.5):
+                grid.append(Params(
+                    pairs_weight=0.0,
+                    ols_lookback=lb,
+                    ols_weight=w,
+                    ols_entry_z=z,
+                    ols_intercept=False,
+                ))
+    # Additive smoke: keep production pairs, add one OLS candidate
+    grid.append(Params(
+        ols_lookback=40, ols_weight=0.10, ols_entry_z=2.0, ols_intercept=False,
+    ))
+    # Intercept variant (replace)
+    grid.append(Params(
+        pairs_weight=0.0,
+        ols_lookback=40, ols_weight=0.20, ols_entry_z=2.0, ols_intercept=True,
+    ))
     return grid
 
 

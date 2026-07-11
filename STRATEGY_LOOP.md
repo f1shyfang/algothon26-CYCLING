@@ -636,6 +636,15 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** KEEP & HARDEN (freeze holds; no code change)
 - **Learnings:** No regressions found — the Day-3 ensemble promote is robust to a fresh gap-shock smoke test and passes every submission-contract check. Baseline stays **251.70**. Ready for submission per `docs/tracks/SUBMIT.md`, though no leaderboard submission was made by this task. Next: if resuming research before the 16 Jul General Round data drops, restart parallel tracks per `docs/tracks/PROTOCOL.md`'s Day-4 freeze note; on 16 Jul, follow `docs/tracks/SUBMIT.md` §6's restart playbook.
 
+### Iteration 31 (Track L1 tick 1 — OLS ALGO-basket)
+
+- **Date:** 2026-07-12
+- **Hypothesis:** Replacing equal-weight β≈1 pairs with rolling OLS β on ALGO vs equal basket (replace mode: `pairs_weight=0`) should improve the residual z-score signal; additive OLS on top of production pairs is a secondary smoke check; intercept-on OLS is a third variant.
+- **Strategy:** Wired `ols_*` overlay in `strategy_positions` (default off). Grid: replace mode lb∈{30,40,60} × weight∈{0.10,0.20,0.30} × entry_z∈{1.5,2.0,2.5} (27 candidates) + one additive smoke (`ols=40@0.10z2.0` with production pairs) + one intercept replace (`ols=40@0.20z2.0+int`). Production floor unchanged (`ols_weight=0` reproduces 251.70).
+- **Result:** Best = replace ols=30@0.20z1.50 (pairs off) → Score = **265.18** (half1=319.29, half2=211.35, train=45.44). Baseline 251.70. `promote: true` (+13.48) per `is_promotable`. Additive smoke also beat floor (255.18) but trailed the replace winner; intercept variant did not promote (242.01).
+- **Decision:** HOLD — PROMOTABLE-held; **not** copied into `teamName.py` per Task 3 instructions.
+- **Learnings:** Short lookback (30) + moderate weight (0.20) + looser entry (z=1.5) dominates replace mode; OLS β estimation appears to add real edge over β≈1 pairs when pairs are turned off. Next L1 tick: fine-tune around lb=30 / w=0.20 / z=1.5 (and maybe keep additive as a secondary arm).
+
 ---
 
 > [!NOTE]
