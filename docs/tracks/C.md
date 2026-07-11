@@ -1,9 +1,10 @@
 # Track C — ALGO-centric / hedge
 
-**Status:** active  
+**Status:** active (Day 1 tick 1 complete — PROMOTABLE candidate held, 228.65 / +17.15, grid-boundary — do not promote yet)  
 **Owner:** Agent C  
 **Params prefix:** `algo_*` extras beyond `algo_dollar_limit` (default off / production values)  
-**Kill rule:** 3 consecutive non-promotable ticks → freeze
+**Kill rule:** 3 consecutive non-promotable ticks → freeze  
+**Next (Day 2):** extend `algo_signal_scale ∈ {2.5, 3.0, 3.5, 4.0}` to find where gains flatten or half2/train degrade before any promote decision. `algo_hedge_weight` is a dead arm — do not re-test. See `docs/tracks/PROTOCOL.md`.
 
 ## Hypothesis bank
 1. Stronger standalone signal on instrument 0 only; others keep production.
@@ -37,3 +38,17 @@ All 18 grid candidates (incl. baseline) passed robustness guards (mean_pl>0, hal
 `algo_signal_scale` monotonically improves score across the entire tested range (0.5→228.65 as scale rises to 2.0) — i.e. simply amplifying the existing ALGO signal before the `[-1,1]` dollar-sizing clip makes ALGO hit its $100K cap more often, and that's net-positive because ALGO already carries a robust edge (see Track C hypothesis 3 / Iteration 5 reject-memory: cutting ALGO's cap hurt, so raising its effective conviction helps in the same direction). **This is a grid-boundary result, not a settled local optimum** — scale=2.0 is the edge of the screened range, so the true optimum (or a diminishing-returns point) is unconfirmed; a future tick should extend the grid (e.g. scale ∈ {2.5, 3.0, 4.0}) to find where returns flatten or half2/train start degrading, since unbounded scale-up eventually must saturate against the ALGO dollar cap and could reintroduce concentration risk. `algo_hedge_weight` is monotonically bad — blending in the negative basket-signal residual only dilutes ALGO's own (already-good) time-series reversal edge; discard this arm.
 
 `loop.py --sweep`/`--json` both confirm `promote: true` (+17.15) and 8/8 existing tests pass with the new default-off fields. **Per task instructions this track does not promote to `teamName.py`** — logged here and in `STRATEGY_LOOP.md` for the coordinating process to reconcile against Track A/B/D results before any production change.
+
+### Extended-scale smoke (Task 6, optional, research-only — not a committed grid change)
+
+Quick one-off check of `algo_signal_scale ∈ {2.5, 3.0, 3.5, 4.0}` to see whether tick-1's grid-boundary win (scale=2.0) keeps improving or flattens/degrades. `build_grid()` was reverted after this smoke run — no permanent `loop.py` change was committed.
+
+| algo_signal_scale | score | half1 | half2 | train |
+|---:|---:|---:|---:|---:|
+| 3.00 | 234.80 | 315.97 | 153.14 | 25.78 |
+| 2.50 | 234.46 | 310.73 | 157.86 | 21.24 |
+| 4.00 | 233.79 | 319.93 | 146.99 | 35.73 |
+| 3.50 | 231.44 | 317.82 | 144.38 | 31.34 |
+| 1.00 (baseline) | 211.49 | 275.99 | 146.75 | 10.19 |
+
+`loop.py --json` picked scale=3.00 as winner (`promote: true`, +23.31 vs baseline). Gains are **not monotonic** past 2.0 — the tick-1 boundary concern was valid: score peaks near scale≈2.5–3.0 and 3.5 dips below both neighbours before 4.0 partially recovers (all four candidates land in a narrow 231–235 band, i.e. diminishing/noisy returns rather than continued monotonic improvement). This confirms Track C is near a local plateau, not still climbing an open boundary. Day-2 tick should treat this as an unconfirmed hint (not a real tick — no `docs/tracks/C.md` Log row added, no commit to `loop.py`) and re-run it as a proper tick with a finer grid around 2.5–3.0 (e.g. {2.25, 2.5, 2.75, 3.0, 3.25}) to settle the local optimum before any promote decision.

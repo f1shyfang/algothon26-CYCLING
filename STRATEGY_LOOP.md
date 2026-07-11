@@ -598,6 +598,19 @@ Use this section to document each pass through the loop:
 - **Decision:** HOLD — logged as promotable but **not** copied into `teamName.py` per Task 5 instructions (track isolation; coordinator reconciles A/B/C/D before any production change).
 - **Learnings:** `algo_signal_scale` monotonically improved score across the whole screened range with scale=2.0 (the grid boundary) winning — this is a boundary result, not a confirmed local optimum, and should be extended further (e.g. 2.5/3.0/4.0) before any promotion decision, since unbounded amplification eventually saturates against ALGO's $100K cap and could reintroduce the concentration risk already tested (and found fine) in Iteration 5. `algo_hedge_weight` was monotonically bad — blending in the negative basket residual only dilutes ALGO's own good reversal edge; that arm is dead. Next Track C tick: extend `algo_signal_scale` grid upward (2.0–4.0) to find where gains flatten or half2/train start degrading.
 
+### Day 1 parallel screen complete (protocol note)
+
+Day-1 parallel tracks A/B/C each completed one research tick against the
+211.49 baseline (see Iterations 25–27 above). **Day-1 parallel screen is
+complete.** Held promote candidates: **Track B** (pairs=40@0.20z2.0 →
+219.30, +7.81) and **Track C** (algo_signal_scale=2.0 → 228.65, +17.15).
+Neither has been copied into `teamName.py` — both are logged as
+`promote: true` per `loop.py --json` but held per track-isolation
+instructions pending lead reconciliation. Track A's tick 1 (xs overlay) was
+rejected (best 185.00 vs baseline). Full protocol scaffolding (daily rhythm,
+kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
+`docs/tracks/PROTOCOL.md`.
+
 ---
 
 > [!NOTE]

@@ -1,9 +1,10 @@
 # Track B — Pairs / cointegration
 
-**Status:** active  
+**Status:** active (Day 1 tick 1 complete — PROMOTABLE candidate held, 219.30 / +7.81)  
 **Owner:** Agent B  
 **Params prefix:** `pairs_*` (default off)  
-**Kill rule:** 3 consecutive non-promotable ticks → freeze
+**Kill rule:** 3 consecutive non-promotable ticks → freeze  
+**Next (Day 2):** sensitivity sweep `pairs_entry_z ∈ {1.75, 2.0, 2.25}` × `pairs_lookback ∈ {30, 40, 50}` (weight fixed at 0.20) to confirm/refine the tick-1 local peak before lead reconciliation. See `docs/tracks/PROTOCOL.md`.
 
 ## Hypothesis bank
 1. Top correlated pairs (ρ>0.7 on train window) trade spread z-score.

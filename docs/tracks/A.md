@@ -1,9 +1,10 @@
 # Track A — Cross-sectional mean reversion
 
-**Status:** active  
+**Status:** active (Day 1 tick 1 complete, 1 consecutive reject — 2 more before kill)  
 **Owner:** Agent A  
 **Params prefix:** `xs_*` (default off → production unchanged)  
-**Kill rule:** 3 consecutive non-promotable ticks → freeze
+**Kill rule:** 3 consecutive non-promotable ticks → freeze  
+**Next (Day 2):** try a rank-based xs formulation (not demean+std); freeze if no genuinely new idea survives scrutiny. See `docs/tracks/PROTOCOL.md`.
 
 ## Hypothesis bank
 1. Rank instruments by 5d return; buy losers / sell winners (exclude ALGO or include).
