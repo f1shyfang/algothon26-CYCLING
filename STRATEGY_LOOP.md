@@ -590,6 +590,14 @@ Use this section to document each pass through the loop:
 - **Decision:** HOLD — logged as promotable but **not** copied into `teamName.py` per Task 4 instructions (track isolation; coordinator reconciles A/B/C/D before any production change).
 - **Learnings:** Wide entry-z (2.0) + larger blend weight (0.20) dominates: rare, strongly-stretched ALGO-vs-basket divergences carry real signal, while tighter thresholds (z=1.0–1.5) fire on noise and underperform baseline. This is a genuinely different signal family from Track A's cross-sectional demean overlay (which uniformly hurt). Next Track B tick: fine-tune around lookback=40/weight=0.20/entry-z=2.0 (e.g. z∈{1.8,2.0,2.5}, weight∈{0.15,0.25,0.30}) and re-check robustness guards don't degrade further out.
 
+### Iteration 27 (Track C tick 1)
+- **Date:** 2026-07-11
+- **Hypothesis:** ALGO's per-instrument reversal signal carries a robust standalone edge (confirmed by the $50K-cap reject in Iteration 5); amplifying that signal's conviction before the `[-1,1]` dollar-sizing clip — or hedging it against the basket — should raise score.
+- **Strategy:** Added `algo_signal_scale` / `algo_hedge_weight` Params (default off), applied to instrument 0's signal after the xs/pairs overlays and before dollar sizing. Grid: scale ∈ {0.5,0.75,1.25,1.5,2.0}, hedge weight ∈ {0.25,0.50,0.75,1.0}. Production unchanged (`algo_signal_scale=1.0`, `algo_hedge_weight=0.0` reproduces 211.49 exactly).
+- **Result:** Best algoscale=2.00 → Score = 228.65 (half1=301.45, half2=155.53, train=15.77). Baseline 211.49. `promote: true` (+17.15) per `is_promotable`. eval.py-equivalent tests still pass (8/8); loop.py `--sweep`/`--json` agree.
+- **Decision:** HOLD — logged as promotable but **not** copied into `teamName.py` per Task 5 instructions (track isolation; coordinator reconciles A/B/C/D before any production change).
+- **Learnings:** `algo_signal_scale` monotonically improved score across the whole screened range with scale=2.0 (the grid boundary) winning — this is a boundary result, not a confirmed local optimum, and should be extended further (e.g. 2.5/3.0/4.0) before any promotion decision, since unbounded amplification eventually saturates against ALGO's $100K cap and could reintroduce the concentration risk already tested (and found fine) in Iteration 5. `algo_hedge_weight` was monotonically bad — blending in the negative basket residual only dilutes ALGO's own good reversal edge; that arm is dead. Next Track C tick: extend `algo_signal_scale` grid upward (2.0–4.0) to find where gains flatten or half2/train start degrading.
+
 ---
 
 > [!NOTE]

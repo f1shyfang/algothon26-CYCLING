@@ -71,6 +71,10 @@ class Params:
     pairs_lookback: int = 20
     pairs_weight: float = 0.0  # 0 => disabled
     pairs_entry_z: float = 1.5
+    # Track C: ALGO-specific exposure multiplier (1.0 => production)
+    algo_signal_scale: float = 1.0
+    # Optional: hedge basket beta with ALGO (0 => off)
+    algo_hedge_weight: float = 0.0
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)
@@ -103,10 +107,20 @@ class Params:
             if self.pairs_weight > 0
             else ""
         )
+        algo_scale = (
+            f" algoscale={self.algo_signal_scale:.2f}"
+            if self.algo_signal_scale != 1.0
+            else ""
+        )
+        algo_hedge = (
+            f" algohedge={self.algo_hedge_weight:.2f}"
+            if self.algo_hedge_weight > 0
+            else ""
+        )
         return (
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
-            f"{clip}{mom}{regime}{ema}{xs}{pairs}"
+            f"{clip}{mom}{regime}{ema}{xs}{pairs}{algo_scale}{algo_hedge}"
         )
 
 
@@ -219,6 +233,15 @@ def strategy_positions(
             pair_sig[0] = -np.clip(z, -params.signal_clip, params.signal_clip)
             pair_sig[1:] = -pair_sig[0] / (nins - 1)
             signal = (1.0 - params.pairs_weight) * signal + params.pairs_weight * pair_sig
+
+    if params.algo_signal_scale != 1.0:
+        signal = signal.copy()
+        signal[0] *= params.algo_signal_scale
+
+    if params.algo_hedge_weight > 0:
+        basket_sig = float(np.mean(signal[1:]))
+        signal = signal.copy()
+        signal[0] = signal[0] * (1.0 - params.algo_hedge_weight) - params.algo_hedge_weight * basket_sig
 
     dollar_limits = np.full(nins, params.default_dollar_limit, dtype=float)
     dollar_limits[0] = params.algo_dollar_limit
@@ -387,6 +410,11 @@ def build_grid() -> list[Params]:
     for w, z in ((0.10, 1.0), (0.10, 1.5), (0.20, 1.5), (0.20, 2.0)):
         grid.append(Params(pairs_weight=w, pairs_entry_z=z, pairs_lookback=20))
         grid.append(Params(pairs_weight=w, pairs_entry_z=z, pairs_lookback=40))
+    # Track C screen (ALGO signal scale / basket-hedge weight)
+    for s in (0.5, 0.75, 1.25, 1.5, 2.0):
+        grid.append(Params(algo_signal_scale=s))
+    for h in (0.25, 0.50, 0.75, 1.0):
+        grid.append(Params(algo_hedge_weight=h))
     return grid
 
 
