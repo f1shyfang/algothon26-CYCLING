@@ -324,7 +324,7 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 def build_grid() -> list[Params]:
     """Candidate parameter sets to explore around the production strategy."""
     grid: list[Params] = []
-    # Baseline for comparison (production: band=0.195, regime 10/60@1.15x0.32)
+    # Baseline for comparison (production: band=0.195, regime 10/60@1.15x0.22)
     grid.append(Params())
     # Iteration 24: ±30% sensitivity plateau check
     for band in (0.137, 0.160, 0.175, 0.185, 0.205, 0.215, 0.230, 0.254):
