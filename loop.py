@@ -63,6 +63,10 @@ class Params:
     regime_scale: float = 0.22
     # Signal EMA blend with prior-day signal (1.0 = off / use today only)
     signal_ema_alpha: float = 1.0
+    # Track A: cross-sectional overlay (default off)
+    xs_lookback: int = 5
+    xs_weight: float = 0.0  # 0 => disabled
+    xs_include_algo: bool = False
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)
@@ -83,10 +87,16 @@ class Params:
             if self.signal_ema_alpha != 1.0
             else ""
         )
+        xs = (
+            f" xs={self.xs_lookback}@{self.xs_weight:.2f}"
+            f"{'+algo' if self.xs_include_algo else ''}"
+            if self.xs_weight > 0
+            else ""
+        )
         return (
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
-            f"{clip}{mom}{regime}{ema}"
+            f"{clip}{mom}{regime}{ema}{xs}"
         )
 
 
@@ -143,6 +153,8 @@ def strategy_positions(
         longest = max(longest, params.momentum_lookback)
     if params.regime_scale != 1.0:
         longest = max(longest, params.regime_vol_long)
+    if params.xs_weight > 0:
+        longest = max(longest, params.xs_lookback)
     min_days = longest + 1 if params.signal_ema_alpha < 1.0 else longest
 
     if nt <= min_days:
@@ -157,9 +169,27 @@ def strategy_positions(
     need = max(params.lookbacks)
     if params.regime_scale != 1.0:
         need = max(need, params.regime_vol_long)
+    if params.xs_weight > 0:
+        need = max(need, params.xs_lookback)
     recent = prc_so_far[:, -(need + 1):]
     log_prices = np.log(recent)
     daily_returns = np.diff(log_prices, axis=1)
+
+    if params.xs_weight > 0:
+        lb = params.xs_lookback
+        if nt > lb:
+            xs_ret = log_prices[:, -1] - log_prices[:, -(lb + 1)]
+            if not params.xs_include_algo:
+                xs_ret = xs_ret.copy()
+                xs_ret[0] = np.nan
+            # Cross-sectional demean (nan-safe)
+            mu = np.nanmean(xs_ret)
+            xs_signal = -(xs_ret - mu)  # reverse relative winners
+            xs_signal = np.nan_to_num(xs_signal, nan=0.0)
+            # Standardise cross-sectionally
+            sd = np.std(xs_signal) + VOLATILITY_FLOOR
+            xs_signal = np.clip(xs_signal / sd, -params.signal_clip, params.signal_clip)
+            signal = (1.0 - params.xs_weight) * signal + params.xs_weight * xs_signal
 
     dollar_limits = np.full(nins, params.default_dollar_limit, dtype=float)
     dollar_limits[0] = params.algo_dollar_limit
@@ -323,20 +353,11 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 # ── The loop: sweep, log, leaderboard, promote ────────────────────────────────
 def build_grid() -> list[Params]:
     """Candidate parameter sets to explore around the production strategy."""
-    grid: list[Params] = []
-    # Baseline for comparison (production: band=0.195, regime 10/60@1.15x0.22)
-    grid.append(Params())
-    # Iteration 24: ±30% sensitivity plateau check
-    for band in (0.137, 0.160, 0.175, 0.185, 0.205, 0.215, 0.230, 0.254):
-        grid.append(Params(rebalance_band=band))
-    for scale in (0.22, 0.26, 0.28, 0.30, 0.34, 0.36, 0.42):
-        grid.append(Params(regime_scale=scale))
-    for thresh in (0.90, 1.00, 1.05, 1.10, 1.20, 1.30, 1.50):
-        grid.append(Params(regime_threshold=thresh))
-    for lb in ((4, 20), (6, 20), (5, 14), (5, 26)):
-        grid.append(Params(lookbacks=lb))
-    for short, long in ((7, 60), (13, 60), (10, 42), (10, 78)):
-        grid.append(Params(regime_vol_short=short, regime_vol_long=long))
+    grid: list[Params] = [Params()]
+    # Track A screen (xs overlay)
+    for lb, w in ((5, 0.10), (5, 0.20), (10, 0.10), (10, 0.20)):
+        grid.append(Params(xs_lookback=lb, xs_weight=w))
+        grid.append(Params(xs_lookback=lb, xs_weight=w, xs_include_algo=True))
     return grid
 
 
