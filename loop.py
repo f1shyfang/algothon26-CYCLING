@@ -404,12 +404,22 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 
 # ── The loop: sweep, log, leaderboard, promote ────────────────────────────────
 def build_grid() -> list[Params]:
-    """Candidate parameter sets to explore around the production strategy."""
+    """Track D (Day 3): joint ensemble of Track B (pairs) + Track C (algo scale)
+    survivors. Solo entries are included for direct comparison against the
+    ensemble combinations. See docs/tracks/D.md.
+    """
     grid = [Params()]
-    for s in (0.5, 0.75, 1.25, 1.5, 2.0):
-        grid.append(Params(algo_signal_scale=s))
-    for h in (0.25, 0.50, 0.75, 1.0):
-        grid.append(Params(algo_hedge_weight=h))
+    # Solo survivors for comparison
+    grid.append(Params(pairs_lookback=40, pairs_weight=0.20, pairs_entry_z=2.0))
+    grid.append(Params(algo_signal_scale=2.0))
+    grid.append(Params(algo_signal_scale=3.0))
+    # Ensembles
+    for scale in (2.0, 3.0):
+        for pw, pz, plb in ((0.10, 2.0, 40), (0.20, 2.0, 40), (0.20, 2.0, 30)):
+            grid.append(Params(
+                pairs_lookback=plb, pairs_weight=pw, pairs_entry_z=pz,
+                algo_signal_scale=scale,
+            ))
     return grid
 
 
