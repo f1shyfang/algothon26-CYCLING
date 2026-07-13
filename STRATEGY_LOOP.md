@@ -737,3 +737,14 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 > of this loop. Each pass should take 15-30 minutes — resist the urge to over-engineer
 > a single strategy when you could be testing two more hypotheses.
 
+---
+
+### Iteration 40 (Adaptive band fine-tune — REJECTED)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** The winning `adapt=10@2.00` sits at the grid boundary; extending `adaptive_band_scale` to {1.8, 2.2, 2.5} and trying tighter calm-vol base bands {0.18, 0.185, 0.19} with the adaptive band active should find a local optimum.
+- **Strategy:** Grid: scale ∈ {1.8, 2.2, 2.5} at base band 0.195 + base band ∈ {0.18, 0.185, 0.19} at scale 2.0.
+- **Result:** Best = `adapt=10@2.20` → Score = 247.02 (+8.17) but **fails robustness**: F1 loses (271.36 < 276.58), F2 wins (209.91 > 192.17), F3 loses (316.28 < 316.81) → only 1/3 folds beat baseline. Robust candidates `adapt=10@1.80` (232.47) and `band=0.19` (232.10) both below baseline 238.85. `promote: false`.
+- **Decision:** DISCARD. Baseline holds at **238.85**.
+- **Learnings:** Scale > 2.0 over-widens the high-vol band, sacrificing too much calm-vol edge (fold1/F3 drop). Tighter base bands with adaptive band active increase turnover without commensurate PnL gain. The adaptive band is already at a local plateau. Next: try asymmetric signal clipping (different clip for long vs short signals) — currently both clipped to ±1.0, but instruments may have skewed return distributions.
+
