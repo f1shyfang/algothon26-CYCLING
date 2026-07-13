@@ -70,13 +70,13 @@ class Params:
     pairs_lookback: int = 40
     pairs_weight: float = 0.0  # replaced by ols
     pairs_entry_z: float = 2.0
-    # Track C: ALGO-specific exposure multiplier (1.0 => off; production: 3.0)
-    algo_signal_scale: float = 3.0  # unchanged
+    # Track C: ALGO-specific exposure multiplier (1.0 => off)
+    algo_signal_scale: float = 1.0
     # Optional: hedge basket beta with ALGO (0 => off)
     algo_hedge_weight: float = 0.0
-    # Track L1: rolling OLS ALGO-vs-basket (production: on, replaces pairs)
+    # Track L1: rolling OLS ALGO-vs-basket (default off)
     ols_lookback: int = 30
-    ols_weight: float = 0.20
+    ols_weight: float = 0.0
     ols_entry_z: float = 1.5
     ols_intercept: bool = False
     # Track L2: multi-pair OLS (default off)
