@@ -547,7 +547,6 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 
 # ── The loop: sweep, log, leaderboard, promote ────────────────────────────────
 def build_grid() -> list[Params]:
-    """Post-promote floor: Params() is the new production baseline."""
     return [Params()]
 
 

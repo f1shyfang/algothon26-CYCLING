@@ -672,6 +672,15 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** KEEP & HARDEN (protocol); begin Track R1/R2 ticks.
 - **Learnings:** Research floor ≠ live production until promote.
 
+### Iteration 35 (Track R1 tick 1 — OLS under walk-forward gates)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** A rolling OLS residual between ALGO and the equal-weight basket adds mean-reversion edge to the minimal-core research floor under the new majority-fold and recent-fold gates.
+- **Strategy:** Grid: `ols_lookback∈{30,40,60} × ols_weight∈{0.10,0.20,0.30} × ols_entry_z∈{1.5,2.0,2.5}`, intercept off, plus the floor. Live `teamName.py` remained frozen at 265.18.
+- **Result:** Floor = official **211.49**, F1 **312.09**, F2 **163.64**, F3 **265.88**. Winner `ols=40@0.30z2.00` = official **218.81**, F1 **286.30**, F2 **184.72**, F3 **266.52**, Mean PL **256.44**, Sharpe **2.411**. `promote: true` (+7.31).
+- **Decision:** HOLD — promotable under the research gates, but not copied to `teamName.py` because this tick is track-isolated.
+- **Learnings:** The winner improves official score, F2, and F3 while giving back some F1; it passes the two-of-three fold majority and recent-fold floor. The sweep grid was reset to floor-only after logging.
+
 ---
 
 > [!NOTE]
