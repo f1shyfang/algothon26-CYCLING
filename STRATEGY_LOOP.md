@@ -663,6 +663,15 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** PROMOTED. New production floor **265.18**.
 - **Learnings:** OLS β replace dominates equal-weight pairs on this data; L2 too weak for ensemble. Next research should start from the OLS floor.
 
+### Iteration 34 (Walk-forward protocol kickoff)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** Expanding-window majority gates + minimal-core floor will re-discover OLS/pairs without overfitting the official window.
+- **Strategy:** Research harness only — Params() reset to minimal core; live teamName.py frozen at 265.18 until lead promote.
+- **Result:** Research floor official score = 211.49; gates = F1–F3 majority + official ↑ + F3≥0.95×base.
+- **Decision:** KEEP & HARDEN (protocol); begin Track R1/R2 ticks.
+- **Learnings:** Research floor ≠ live production until promote.
+
 ---
 
 > [!NOTE]

@@ -11,9 +11,11 @@
 
 Maximise the Algothon score on the last 250 days of `prices.txt`:
 `score = μ × SR² / (SR² + 1)`, where `SR = √250 · μ/σ` of daily PnL.
-Current production baseline (in `teamName.py`): **score ≈ 211.49** (5d/20d
-volatility-standardised reversal, 19.5% rebalance band, high-vol regime cut
-10d/60d @ 1.15 → 22% exposure).
+Research baseline (`Params()` minimal core in `loop.py`): **score = 211.49**
+(5d/20d volatility-standardised reversal, 19.5% rebalance band, high-vol
+regime cut 10d/60d @ 1.15 → 22% exposure; all overlays off). Live
+`teamName.py` may still score **265.18** until the lead promotes — do not
+treat `eval.py` as the research floor during walk-forward ticks.
 
 The agent's job is to **raise the baseline** — or prove it can't be beaten this
 round and say so. A non-improving iteration that is honestly rejected is a
@@ -28,8 +30,9 @@ success, not a failure.
    network, no packages outside `requirements-dev.txt`, signature exactly
    `getMyPosition(prcSoFar) -> np.ndarray` of shape `(51,)`, integer positions.
 3. **No look-ahead:** signals may use only `prcSoFar` (history up to today).
-4. **Promote only on the deterministic verdict** from `loop.py` (see step 4).
-   Do not promote on a raw score win alone — overfitting is the default failure.
+4. **Promote only on the deterministic verdict** from `loop.py --json` (see
+   step 4). Do not promote on official score alone — overfitting is the default
+   failure.
 5. **One change per iteration.** Isolate the variable so the log stays causal.
 6. **Never fabricate results.** Every number in the log must come from a real run.
 
@@ -59,10 +62,10 @@ success, not a failure.
 python loop.py --sweep
 ```
 
-- Every candidate is scored on four windows: **official** (last 250d),
-  **half1/half2** (the two 125d halves), and **train** (days 125–250, which the
-  official metric never sees). A win on `score` with negative `train` or a
-  collapsed `half2` is overfitting — expect it and reject it.
+- Every candidate is scored on four windows: **official** (last 250d) and three
+  **walk-forward folds** (F1/F2/F3: three consecutive 100-day segments ending at
+  the official window). A win on `score` with a collapsed F3 or a minority of
+  folds beating baseline is overfitting — expect it and reject it.
 
 ### 4 — Decide (deterministic)
 Get the machine verdict instead of eyeballing:
@@ -71,9 +74,11 @@ Get the machine verdict instead of eyeballing:
 python loop.py --json
 ```
 
-- `promote: false` → **REJECT.** Record why (which guard failed), go to step 6.
-- `promote: true` → **PROMOTE** the `winner` params. It has already passed:
-  robust on all windows, beats baseline official score, and keeps `half2`.
+- `promote: false` → **REJECT.** Record why (which gate failed), go to step 6.
+- `promote: true` → **PROMOTE** the `winner` params (lead only — see
+  `docs/tracks/PROTOCOL.md`). It has already passed all walk-forward gates:
+  **majority of F1–F3 beat baseline**, **official score ↑**, and **F3 ≥
+  0.95× baseline F3**.
 
 ### 5 — Promote (only if verdict said so)
 - Edit **`teamName.py`** to match the winning `Params` (change the constants:
@@ -132,9 +137,11 @@ stopping criterion is met.
 
 ## Why this converges (not just churns)
 
-- **Ground truth is frozen** (`eval.py`) and the harness is verified against it
-  (`loop.py` reproduces 164.75 exactly), so score deltas are trustworthy.
-- **The promote gate requires out-of-sample survival** (train + both halves), so
-  the loop can only ratchet the baseline *up* on genuinely robust edges.
+- **Ground truth is frozen** (`eval.py`) and the harness mirrors its scoring
+  (`loop.py` reproduces the research floor **211.49** on minimal-core `Params()`),
+  so score deltas are trustworthy.
+- **The promote gate requires walk-forward survival** (majority folds + official
+  ↑ + F3 ≥ 0.95×base F3), so the loop can only ratchet the baseline *up* on
+  genuinely robust edges.
 - **The log is the memory**: every rejection encodes a constraint, so the search
   space shrinks each pass instead of revisiting dead ends.

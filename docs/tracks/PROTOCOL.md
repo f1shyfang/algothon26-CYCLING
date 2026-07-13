@@ -1,4 +1,109 @@
-# Parallel Agent Execution Protocol (Day 1–2)
+# Parallel Agent Execution Protocol
+
+> Operational rhythm for running research tracks in parallel against the shared
+> `loop.py` research harness, with a lead agent/human reconciling promotes.
+> Companion to `AGENT_LOOP.md` (per-tick protocol for a single agent).
+
+---
+
+## Wave: Walk-forward R1/R2 (current)
+
+**Research floor:** minimal-core `Params()` → `python loop.py` scores **211.49**
+(all overlays off: 5d/20d reversal, band=0.195, regime 10/60@1.15→0.22).
+Live `teamName.py` / `eval.py` may still show **265.18** until the lead
+promotes — use `loop.py` for floor checks during research ticks.
+
+**Promote gates** (from `python loop.py --json`):
+- Majority of walk-forward folds F1–F3 beat baseline fold scores
+- Official score strictly above baseline
+- F3 ≥ 0.95× baseline F3
+- Do **not** promote on official score alone
+
+| Track | Prefix | Doc |
+|:---|:---|:---|
+| **R1** — rolling OLS ALGO–basket | `ols_*` | `docs/tracks/R1.md` |
+| **R2** — multi-pair OLS | `mpairs_*` | `docs/tracks/R2.md` |
+
+### Daily rhythm
+
+```
+Morning assign  →  Parallel ticks  →  Midday merge  →  Evening log
+     (lead)          (R1, R2)          (lead)          (lead)
+```
+
+**Morning assign (lead)**
+1. Confirm research floor: `python loop.py` → official score **211.49** (not
+   `eval.py` until after a promote).
+2. Read each `docs/tracks/{R1,R2}.md` reject memory and prior tick log.
+3. Assign exactly **one** untried hypothesis per track — never re-assign a
+   hypothesis already in a track's reject memory.
+
+**Parallel ticks (agents R1, R2)**
+- Each agent runs **one iteration** of `AGENT_LOOP.md` end to end: form
+  hypothesis → extend `build_grid()` for its own `Params` prefix only →
+  `python loop.py --sweep` → `python loop.py --json` → log → stop.
+- Touch only your track's `Params` fields in `build_grid()`; leave all other
+  overlays at default (off).
+- No agent edits `teamName.py` or `eval.py`. Research only.
+
+**Midday merge (lead)**
+1. Collect each track's `python loop.py --json` verdict.
+2. Decision:
+   - All `promote: false` → no production change; update track docs/log only.
+   - Exactly one `promote: true` → proceed to promote procedure for that winner.
+   - Two or more claim `promote: true` → keep the higher official score that
+     still passes all walk-forward gates; park the other in reject memory.
+3. Apply the **kill rule** (below).
+
+**Evening log (lead)**
+- Append one summary entry to `STRATEGY_LOOP.md`'s Iteration Log covering both
+  ticks run that day.
+
+### Kill rule
+
+> **3 consecutive non-promotable ticks on a track → freeze that track.**
+
+- Consecutive is per-track, not global.
+- On freeze: set `**Status:** frozen` in `docs/tracks/{R1,R2}.md` and reassign
+  the agent or idle until a genuinely new hypothesis family emerges.
+
+### Lead-only promote rule
+
+> **Only the lead merges into `teamName.py` — never a track agent.**
+
+- Track agents stop at logging the verdict (`promote: true/false` + F1/F2/F3 +
+  official numbers) in their track doc and `STRATEGY_LOOP.md`.
+- A `promote: true` verdict is necessary but not sufficient — the lead still
+  reconciles across tracks at midday merge before touching `teamName.py`.
+- Promoting requires: confirm verdict → port winning `Params` into
+  `teamName.py` → `python eval.py` matches `loop.py` winner score →
+  `python -m unittest test_teamName.py -v` all green → sync `loop.py`
+  `Params` defaults → log + commit. Any `eval.py`/`loop.py` mismatch reverts
+  the promote and is logged as harness drift.
+
+### Agent launch cheat-sheets
+
+**Track R1**
+
+```text
+Track R1 only. Read AGENT_LOOP.md + docs/tracks/R1.md.
+One hypothesis. Touch only ols_* Params in loop.py build_grid.
+Never edit teamName.py/eval.py. Run --sweep and --json. Log and stop.
+```
+
+**Track R2**
+
+```text
+Track R2 only. Read AGENT_LOOP.md + docs/tracks/R2.md.
+One hypothesis. Touch only mpairs_* Params in loop.py build_grid.
+Never edit teamName.py/eval.py. Run --sweep and --json. Log and stop.
+```
+
+---
+
+## Historical — Parallel Agent Execution Protocol (Day 1–2, Tracks A/B/C)
+
+> *Superseded by walk-forward R1/R2 above. Kept for context.*
 
 > Operational rhythm for running Tracks A/B/C in parallel against the shared
 > `loop.py` research harness, with a lead agent/human reconciling promotes.

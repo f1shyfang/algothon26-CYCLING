@@ -685,7 +685,7 @@ def main() -> None:
     args = parser.parse_args()
 
     prc_all = load_prices()
-    baseline = Params()  # matches current teamName.py
+    baseline = Params()  # research floor (minimal core); live teamName.py may differ until promote
 
     if args.json:
         print(json.dumps(verdict_json(prc_all, baseline, build_grid()), indent=2))
