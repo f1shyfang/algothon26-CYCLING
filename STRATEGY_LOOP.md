@@ -748,3 +748,14 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** DISCARD. Baseline holds at **238.85**.
 - **Learnings:** Scale > 2.0 over-widens the high-vol band, sacrificing too much calm-vol edge (fold1/F3 drop). Tighter base bands with adaptive band active increase turnover without commensurate PnL gain. The adaptive band is already at a local plateau. Next: try asymmetric signal clipping (different clip for long vs short signals) — currently both clipped to ±1.0, but instruments may have skewed return distributions.
 
+---
+
+### Iteration 41 (Asymmetric signal clipping — REJECTED)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** Standardised returns have skew — negative skew means large negative z (long signals) are noisy; positive skew means large positive z (short signals) are noisy. Asymmetric clipping (tighter on the noisy side) should cut tail turnover without sacrificing edge on the clean side.
+- **Strategy:** Added `signal_clip_long` (clips positive z → short signals) and `signal_clip_short` (clips negative z → long signals). Grid: one-sided clips ∈ {0.85, 0.90, 1.10, 1.15} + diagonals {(0.90,1.10), (1.10,0.90), (0.85,1.15), (1.15,0.85)}.
+- **Result:** Best = `clipL=1.00 clipS=0.90` → Score = 241.34 (+2.49, Sharpe 2.79) but **fails robustness**: F1 loses (260.49 < 276.58), F2 wins (221.90 > 192.17), F3 loses (298.18 < 316.81) → 1/3 folds beat baseline. Robust candidates (`clipL=1.15` at 236.58, `clipS=1.10` at 229.44) both below baseline 238.85. `promote: false`.
+- **Decision:** DISCARD. Baseline holds at **238.85**.
+- **Learnings:** Tighter short clip (clipS < 1) improves Sharpe by cutting noisy long signals but collapses F1/F3 — the lost edge on calm-vol reversals outweighs noise reduction. Wider long clip (clipL > 1) adds noise without edge. Asymmetric clip alone is not a free lunch here. Next: try **vol-targeted position sizing** — scale target dollar exposure per instrument by inverse rolling vol (distinct from regime cut which is binary and portfolio-wide), to equalise risk contribution across instruments.
+

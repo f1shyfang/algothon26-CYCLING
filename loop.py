@@ -88,6 +88,9 @@ class Params:
     # Adaptive rebalance band: widen in high vol, tighten in low vol (0 = off)
     adaptive_band_vol_lb: int = 10  # lookback for vol ratio; 0 => disabled
     adaptive_band_scale: float = 2.0  # multiplier on band when vol ratio >= 1
+    # Asymmetric signal clipping (1.0 = symmetric/off)
+    signal_clip_long: float = 1.0  # clip for positive z-scores (long signals)
+    signal_clip_short: float = 1.0  # clip for negative z-scores (short signals)
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)
@@ -149,11 +152,14 @@ class Params:
             if self.adaptive_band_vol_lb > 0
             else ""
         )
+        asym = ""
+        if self.signal_clip_long != 1.0 or self.signal_clip_short != 1.0:
+            asym = f" clipL={self.signal_clip_long:.2f} clipS={self.signal_clip_short:.2f}"
         return (
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
             f"{clip}{mom}{regime}{ema}{xs}{pairs}{algo_scale}{algo_hedge}"
-            f"{ols}{mpairs}{adapt}"
+            f"{ols}{mpairs}{adapt}{asym}"
         )
 
 
@@ -219,6 +225,8 @@ def _mpairs_signal(
     if not chosen:
         return sig
     active = 0
+    clip_long = params.signal_clip_long
+    clip_short = params.signal_clip_short
     for _, i, j in chosen:
         yi = log_prices[i, :]
         xj = log_prices[j, :]
@@ -227,7 +235,8 @@ def _mpairs_signal(
         z = spread_z(spread, lb)
         if abs(z) < params.mpairs_entry_z:
             continue
-        zc = float(np.clip(z, -params.signal_clip, params.signal_clip))
+        # Asymmetric clip on z-score
+        zc = float(np.clip(z, -clip_short, clip_long))
         # Mean-revert: short spread if z>0 → short i, long j * beta
         sig[i] += -zc
         sig[j] += zc * beta
@@ -235,9 +244,10 @@ def _mpairs_signal(
     if active == 0:
         return np.zeros(nins)
     sig /= active
-    # Renormalise so max abs <= signal_clip
+    # Renormalise so max abs <= asymmetric clip
+    clip_max = max(params.signal_clip_long, params.signal_clip_short)
     m = np.max(np.abs(sig)) + VOLATILITY_FLOOR
-    return np.clip(sig / m, -params.signal_clip, params.signal_clip) * params.signal_clip
+    return np.clip(sig / m, -params.signal_clip_short, params.signal_clip_long) * clip_max
 
 
 # ── Parameterised strategy (a pure function of history + previous positions) ──
@@ -259,21 +269,28 @@ def _reversal_signal(prc_so_far: np.ndarray, params: Params) -> np.ndarray:
         weights = tuple(1.0 / len(params.lookbacks) for _ in params.lookbacks)
 
     signal = np.zeros(nins)
+    clip_long = params.signal_clip_long
+    clip_short = params.signal_clip_short
     for lookback, weight in zip(params.lookbacks, weights):
         cum_return = log_prices[:, -1] - log_prices[:, -(lookback + 1)]
         vol = daily_returns[:, -lookback:].std(axis=1) * np.sqrt(lookback)
         standardized = cum_return / np.maximum(vol, VOLATILITY_FLOOR)
-        signal -= np.clip(standardized, -params.signal_clip, params.signal_clip) * weight
+        # Asymmetric clip: positive std (short signal) clipped at clip_long, negative (long signal) at clip_short
+        clipped = np.where(standardized > 0,
+                          np.clip(standardized, 0, clip_long),
+                          np.clip(standardized, -clip_short, 0))
+        signal -= clipped * weight
 
     if params.momentum_weight:
         mlb = params.momentum_lookback
         mom_ret = log_prices[:, -1] - log_prices[:, -(mlb + 1)]
         mom_vol = daily_returns[:, -mlb:].std(axis=1) * np.sqrt(mlb)
         mom_std = mom_ret / np.maximum(mom_vol, VOLATILITY_FLOOR)
-        signal += (
-            np.clip(mom_std, -params.signal_clip, params.signal_clip)
-            * params.momentum_weight
-        )
+        # Asymmetric clip for momentum too
+        clipped_mom = np.where(mom_std > 0,
+                              np.clip(mom_std, 0, clip_long),
+                              np.clip(mom_std, -clip_short, 0))
+        signal += clipped_mom * params.momentum_weight
     return signal
 
 
@@ -344,7 +361,7 @@ def strategy_positions(
             xs_signal = np.nan_to_num(xs_signal, nan=0.0)
             # Standardise cross-sectionally
             sd = np.std(xs_signal) + VOLATILITY_FLOOR
-            xs_signal = np.clip(xs_signal / sd, -params.signal_clip, params.signal_clip)
+            xs_signal = np.clip(xs_signal / sd, -params.signal_clip_short, params.signal_clip_long)
             signal = (1.0 - params.xs_weight) * signal + params.xs_weight * xs_signal
 
     if params.pairs_weight > 0 and nt > params.pairs_lookback:
@@ -358,7 +375,7 @@ def strategy_positions(
         z = (spread[-1] - mu_s) / sd_s
         if abs(z) >= params.pairs_entry_z:
             pair_sig = np.zeros(nins)
-            pair_sig[0] = -np.clip(z, -params.signal_clip, params.signal_clip)
+            pair_sig[0] = -np.clip(z, -params.signal_clip_short, params.signal_clip_long)
             pair_sig[1:] = -pair_sig[0] / (nins - 1)
             signal = (1.0 - params.pairs_weight) * signal + params.pairs_weight * pair_sig
 
@@ -371,7 +388,7 @@ def strategy_positions(
         z = spread_z(spread, lb)
         if abs(z) >= params.ols_entry_z:
             ols_sig = np.zeros(nins)
-            ols_sig[0] = -np.clip(z, -params.signal_clip, params.signal_clip)
+            ols_sig[0] = -np.clip(z, -params.signal_clip_short, params.signal_clip_long)
             ols_sig[1:] = -ols_sig[0] / (nins - 1)
             signal = (1.0 - params.ols_weight) * signal + params.ols_weight * ols_sig
 
