@@ -14,6 +14,11 @@ MPAIRS_WEIGHT = 0.20
 MPAIRS_TOP_K = 3
 MPAIRS_ENTRY_Z = 1.5
 MPAIRS_MIN_CORR = 0.65
+OLS_LOOKBACK = 40
+OLS_WEIGHT = 0.20
+OLS_ENTRY_Z = 2.0
+ADAPTIVE_BAND_VOL_LB = 10
+ADAPTIVE_BAND_SCALE = 2.0
 
 _current_positions = np.zeros(0, dtype=int)
 _last_history = np.zeros((0, 0))
@@ -43,13 +48,20 @@ def _mpairs_signal(log_prices, daily_returns):
     if n < 2 or MPAIRS_LOOKBACK < 3:
         return sig
 
+    # Pairwise abs corr using vectorized corrcoef for speed
+    stds = np.std(rets, axis=1)
+    valid = stds >= VOLATILITY_FLOOR
+    corr_matrix = np.corrcoef(rets)
     candidates = []
     for i in range(n):
+        if not valid[i]:
+            continue
         for j in range(i + 1, n):
-            a, b = rets[i], rets[j]
-            if a.std() < VOLATILITY_FLOOR or b.std() < VOLATILITY_FLOOR:
+            if not valid[j]:
                 continue
-            corr = float(np.corrcoef(a, b)[0, 1])
+            corr = corr_matrix[i, j]
+            if np.isnan(corr):
+                continue
             if abs(corr) >= MPAIRS_MIN_CORR:
                 candidates.append((abs(corr), i + 1, j + 1))
     candidates.sort(reverse=True)
@@ -81,7 +93,9 @@ def getMyPosition(prcSoFar):
     global _current_positions, _last_history
 
     nins, nt = prcSoFar.shape
-    longest_lookback = max(max(LOOKBACKS), REGIME_VOL_LONG, MPAIRS_LOOKBACK)
+    longest_lookback = max(max(LOOKBACKS), REGIME_VOL_LONG, MPAIRS_LOOKBACK, OLS_LOOKBACK)
+    if ADAPTIVE_BAND_VOL_LB > 0:
+        longest_lookback = max(longest_lookback, ADAPTIVE_BAND_VOL_LB)
 
     same_history = _last_history.shape == prcSoFar.shape and np.array_equal(
         _last_history,
@@ -115,6 +129,18 @@ def getMyPosition(prcSoFar):
         )
         signal -= np.clip(standardized_return, -1.0, 1.0) / len(LOOKBACKS)
 
+    if OLS_WEIGHT > 0 and nt > OLS_LOOKBACK:
+        basket = np.nanmean(log_prices[1:, :], axis=0)
+        algo = log_prices[0, :]
+        beta = _rolling_ols_beta(algo, basket, OLS_LOOKBACK)
+        spread = algo - beta * basket
+        z = _spread_z(spread, OLS_LOOKBACK)
+        if abs(z) >= OLS_ENTRY_Z:
+            ols_sig = np.zeros(nins)
+            ols_sig[0] = -np.clip(z, -1.0, 1.0)
+            ols_sig[1:] = -ols_sig[0] / (nins - 1)
+            signal = (1.0 - OLS_WEIGHT) * signal + OLS_WEIGHT * ols_sig
+
     mpairs_signal = _mpairs_signal(log_prices, daily_returns)
     if np.any(np.abs(mpairs_signal) > VOLATILITY_FLOOR):
         signal = (1.0 - MPAIRS_WEIGHT) * signal + MPAIRS_WEIGHT * mpairs_signal
@@ -131,7 +157,14 @@ def getMyPosition(prcSoFar):
     desired_positions = np.trunc(target_dollars / current_prices).astype(int)
 
     rebalance_notional = np.abs(desired_positions - _current_positions) * current_prices
-    should_rebalance = rebalance_notional >= REBALANCE_BAND * dollar_limits
+    band = REBALANCE_BAND
+    if ADAPTIVE_BAND_VOL_LB > 0 and daily_returns.shape[1] >= 2 * ADAPTIVE_BAND_VOL_LB:
+        ab_short = daily_returns[:, -ADAPTIVE_BAND_VOL_LB:].std(axis=1)
+        ab_long = daily_returns[:, -2 * ADAPTIVE_BAND_VOL_LB:].std(axis=1)
+        ab_ratio = ab_short / np.maximum(ab_long, VOLATILITY_FLOOR)
+        if float(np.median(ab_ratio)) >= 1.0:
+            band *= ADAPTIVE_BAND_SCALE
+    should_rebalance = rebalance_notional >= band * dollar_limits
     new_positions = np.where(
         should_rebalance,
         desired_positions,

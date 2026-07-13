@@ -75,9 +75,9 @@ class Params:
     # Optional: hedge basket beta with ALGO (0 => off)
     algo_hedge_weight: float = 0.0
     # Track L1: rolling OLS ALGO-vs-basket (default off)
-    ols_lookback: int = 30
-    ols_weight: float = 0.0
-    ols_entry_z: float = 1.5
+    ols_lookback: int = 40
+    ols_weight: float = 0.20
+    ols_entry_z: float = 2.0
     ols_intercept: bool = False
     # Track L2: multi-pair OLS (production overlay)
     mpairs_lookback: int = 40
@@ -85,6 +85,9 @@ class Params:
     mpairs_top_k: int = 3
     mpairs_entry_z: float = 1.5
     mpairs_min_corr: float = 0.65
+    # Adaptive rebalance band: widen in high vol, tighten in low vol (0 = off)
+    adaptive_band_vol_lb: int = 10  # lookback for vol ratio; 0 => disabled
+    adaptive_band_scale: float = 2.0  # multiplier on band when vol ratio >= 1
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)
@@ -141,11 +144,16 @@ class Params:
             if self.mpairs_weight > 0
             else ""
         )
+        adapt = (
+            f" adapt={self.adaptive_band_vol_lb}@{self.adaptive_band_scale:.2f}"
+            if self.adaptive_band_vol_lb > 0
+            else ""
+        )
         return (
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
             f"{clip}{mom}{regime}{ema}{xs}{pairs}{algo_scale}{algo_hedge}"
-            f"{ols}{mpairs}"
+            f"{ols}{mpairs}{adapt}"
         )
 
 
@@ -190,14 +198,20 @@ def _mpairs_signal(
     n = rets.shape[0]
     if n < 2 or lb < 3:
         return sig
-    # Pairwise abs corr
+    # Pairwise abs corr using vectorized corrcoef for speed
+    stds = np.std(rets, axis=1)
+    valid = stds >= VOLATILITY_FLOOR
+    corr_matrix = np.corrcoef(rets)
     candidates: list[tuple[float, int, int]] = []
     for i in range(n):
+        if not valid[i]:
+            continue
         for j in range(i + 1, n):
-            a, b = rets[i], rets[j]
-            if a.std() < VOLATILITY_FLOOR or b.std() < VOLATILITY_FLOOR:
+            if not valid[j]:
                 continue
-            corr = float(np.corrcoef(a, b)[0, 1])
+            corr = corr_matrix[i, j]
+            if np.isnan(corr):
+                continue
             if abs(corr) >= params.mpairs_min_corr:
                 candidates.append((abs(corr), i + 1, j + 1))  # map back to instrument idx
     candidates.sort(reverse=True)
@@ -287,6 +301,8 @@ def strategy_positions(
         longest = max(longest, params.ols_lookback)
     if params.mpairs_weight > 0:
         longest = max(longest, params.mpairs_lookback)
+    if params.adaptive_band_vol_lb > 0:
+        longest = max(longest, params.adaptive_band_vol_lb)
     min_days = longest + 1 if params.signal_ema_alpha < 1.0 else longest
 
     if nt <= min_days:
@@ -309,6 +325,8 @@ def strategy_positions(
         need = max(need, params.ols_lookback)
     if params.mpairs_weight > 0:
         need = max(need, params.mpairs_lookback)
+    if params.adaptive_band_vol_lb > 0:
+        need = max(need, params.adaptive_band_vol_lb)
     recent = prc_so_far[:, -(need + 1):]
     log_prices = np.log(recent)
     daily_returns = np.diff(log_prices, axis=1)
@@ -386,7 +404,16 @@ def strategy_positions(
     desired = np.trunc(target_dollars / current_prices).astype(int)
 
     rebalance_notional = np.abs(desired - prev_positions) * current_prices
-    should_rebalance = rebalance_notional >= params.rebalance_band * dollar_limits
+    band = params.rebalance_band
+    if params.adaptive_band_vol_lb > 0:
+        ab_lb = params.adaptive_band_vol_lb
+        ab_short = daily_returns[:, -ab_lb:].std(axis=1)
+        ab_long = daily_returns[:, -2 * ab_lb:].std(axis=1) if need >= 2 * ab_lb else ab_short
+        ab_ratio = ab_short / np.maximum(ab_long, VOLATILITY_FLOOR)
+        ab_median_ratio = float(np.median(ab_ratio))
+        if ab_median_ratio >= 1.0:
+            band *= params.adaptive_band_scale
+    should_rebalance = rebalance_notional >= band * dollar_limits
     new_positions = np.where(should_rebalance, desired, prev_positions)
 
     max_shares = np.trunc(dollar_limits / current_prices).astype(int)

@@ -233,6 +233,19 @@ python eval.py
 | 22 | Signal EMA blend (rejected) | ema alpha 0.50–0.90 | — | — | 1.96 | 179.32 | — | Smoothing helped train at low alpha but cut official score ≥13%; band already damps churn |
 | 23 | Deeper regime cut (promoted) | scale 0.32 → 0.22 | 255.7 | 1848.61 | 2.19 | 211.49 | 32,534,905 | ±30% sweep: deeper cut raises half2/train; still not a plateau |
 | 24 | Track A xs overlay (rejected) | xs 10d@20% demean blend (+algo best) | 222.4 | — | 2.22 | 185.00 | 28,248,637 | All 8 xs variants scored 154.64–185.00 vs baseline 211.49; promote false |
+| 25 | Track B pairs overlay (held) | pairs=40@0.20z2.0 | — | — | — | 219.30 | — | ALGO-vs-basket spread reversal |
+| 26 | Track C algo scaling (held) | algoscale=2.00 | — | — | — | 228.65 | — | Permanent ALGO reversal scaling |
+| 27 | Track D ensemble (held) | pairs=40@0.20z2.0 + algoscale=3.00 | — | — | — | 251.70 | — | Non-linear blend of pairs and algo scale |
+| 28 | Lead promote | same as Run 27 | 298.1 | — | 2.33 | 251.70 | — | Promotion of Day-3 ensemble |
+| 29 | Track L1 OLS replace (held) | replace ols=30@0.20z1.50 | — | — | — | 265.18 | — | OLS ALGO-basket replace (pairs off) |
+| 30 | Track L2 multi-pair OLS (rejected) | mpairs=40@0.10k3z2.00c0.85 | — | — | — | 221.94 | — | No active pairs selected due to high corr limit |
+| 31 | Lead promote L1 OLS replace | replace ols=30@0.20z1.50 | — | — | — | 265.18 | — | Promotion of L1 OLS replace |
+| 32 | Walk-forward kickoff | Params() reset to minimal core | — | — | — | 211.49 | — | Research floor reset for walk-forward |
+| 33 | Track R1 OLS under gates (held) | ols=40@0.30z2.00 | 256.44 | — | 2.41 | 218.81 | — | OLS ALGO-basket under walk-forward |
+| 34 | Track R2 mpairs under gates (held) | mpairs=40@0.20k3z1.50c0.65 | 262.16 | — | 2.35 | 221.91 | — | Multi-pair OLS under walk-forward |
+| 35 | Lead promote R2 | mpairs=40@0.20k3z1.50c0.65 | 262.16 | — | 2.35 | 221.91 | — | R2 promoted to new floor |
+| 36 | Track R1+R2 OLS+mpairs sweep | ols=40@0.20z2.00 + mpairs | 269.68 | 1646.44 | 2.59 | 234.69 | 30,455,064 | Vectorized corr speedup, OLS additive on mpairs |
+| 37 | Adaptive band (promoted) | adapt=10@2.00, band 0.195 | 273.22 | 1638.85 | 2.64 | 238.85 | 29,261,309 | Widen band 2× when median short/long vol ratio ≥ 1 |
 
 ---
 
@@ -699,9 +712,28 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** PROMOTED R2 only. R1 is parked for later ensemble research.
 - **Learnings:** The live score intentionally reset from the old-gate OLS+algoscale score of **265.18** to the walk-forward-selected minimal-core + multi-pair score of **221.91**. Future research starts from this new floor.
 
+### Iteration 38 (Track R1+R2 joint ensemble)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** Blending the parked OLS ALGO-basket overlay (R1) with the production mpairs overlay (R2) will add orthogonal ALGO-specific mean-reversion edge on top of instrument-pair signals.
+- **Strategy:** Sweep OLS additive overlay parameters + mpairs fine-tuning + joint ensemble parameters. Also, optimized the correlation computation in both `loop.py` and `teamName.py` via vectorized `np.corrcoef` (speedup ~30x).
+- **Result:** Winner: `ols=40@0.20z2.00` + `mpairs=40@0.20k3z1.50c0.65` → Score = **234.69** (Mean PL = 269.68, Sharpe = 2.59, fold1 = 282.31, fold2 = 190.47, fold3 = 300.97). Baseline was 221.91. `promote: true` (+12.78).
+- **Decision:** PROMOTED. Synced parameters to `teamName.py` and `CYCLING.py`.
+- **Learnings:** The joint ensemble robustly beats the individual overlays (mpairs-only floor: 221.91; OLS-only floor: 218.81). Vectorization of `_mpairs_signal` correlation screening resolved the massive compute bottleneck, reducing sweep runtimes from 17 minutes to under 30 seconds.
+
 ---
+
+### Iteration 39 (Adaptive rebalance band)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** A fixed rebalance band is either too tight in high-vol periods (noise-driven turnover) or too loose in calm periods (missed mean-reversion). Widening the band when the median short/long vol ratio across instruments exceeds 1 should cut noisy turnover without sacrificing edge.
+- **Strategy:** Added `adaptive_band_vol_lb` and `adaptive_band_scale` Params (default off). Grid: vol_lb ∈ {10, 20, 30} × scale ∈ {1.2, 1.5, 2.0}. Winner: adapt=10@2.00.
+- **Result:** Mean PL = 273.22, Sharpe = 2.64, Score = **238.85** (F1=276.58, F2=192.17, F3=316.81). Baseline 234.69. `promote: true` (+4.16). eval.py matched; 8/8 tests pass.
+- **Decision:** KEEP & HARDEN. New baseline **238.85**.
+- **Learnings:** Short lookback (10d) + aggressive scale (2×) dominates: a fast vol signal widens the band just when noise spikes, preventing churn on false reversals. Longer windows (20/30) are too slow and dilute the effect. Only the highest scale (2.0) promoted — boundary result, fine-tune scale ∈ {1.8, 2.2, 2.5} next. Dollar volume fell from 30.5M to 29.3M (less turnover), and Sharpe improved from 2.59 to 2.64.
 
 > [!NOTE]
 > **Keep iterating.** The best algothon entries typically go through 10-20 iterations
 > of this loop. Each pass should take 15-30 minutes — resist the urge to over-engineer
 > a single strategy when you could be testing two more hypotheses.
+
