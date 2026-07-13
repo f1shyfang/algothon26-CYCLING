@@ -6,8 +6,11 @@ import numpy as np
 from loop import (
     Params,
     evaluate,
+    is_promotable,
     load_prices,
     rolling_ols_beta,
+    simulate,
+    simulate_range,
     spread_z,
     VOLATILITY_FLOOR,
 )
@@ -74,6 +77,28 @@ class TestDefaultOffInvariance(unittest.TestCase):
     def test_production_baseline_score(self):
         base = evaluate(self.prc, Params())
         self.assertAlmostEqual(base.score, 265.18, places=2)
+
+
+class TestSimulateRange(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.prc = load_prices()
+        cls.nt = cls.prc.shape[1]
+
+    def test_official_range_matches_simulate(self):
+        p = Params()
+        a = simulate(self.prc, p, 250)
+        # last 250 days: start_day = nt-250, end_day = nt
+        b = simulate_range(self.prc, p, start_day=self.nt - 250, end_day=self.nt)
+        self.assertAlmostEqual(a.score, b.score, places=4)
+        self.assertEqual(len(a.pll), len(b.pll))
+        np.testing.assert_allclose(a.pll, b.pll, rtol=1e-9, atol=1e-9)
+
+    def test_fold_length_is_100(self):
+        p = Params()
+        # F1: days 201-300 → start_day=200, end_day=300
+        r = simulate_range(self.prc, p, start_day=200, end_day=300)
+        self.assertEqual(len(r.pll), 100)
 
 
 if __name__ == "__main__":

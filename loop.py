@@ -418,9 +418,18 @@ class Result:
     pll: np.ndarray = field(repr=False)
 
 
-def simulate(prc_all: np.ndarray, params: Params, num_test_days: int) -> Result:
-    """Day-by-day simulation identical in mechanics to eval.py's calcPL."""
-    nins, nt = prc_all.shape
+def simulate_range(
+    prc_all: np.ndarray,
+    params: Params,
+    start_day: int,
+    end_day: int,
+) -> Result:
+    """Simulate positions from start_day..end_day; score PnL for t > start_day.
+
+    Day indices match the existing simulate() convention: for a series of length
+    nt, official last-250 uses start_day=nt-250, end_day=nt.
+    """
+    nins = prc_all.shape[0]
 
     comm_rate = np.full(nins, DEFAULT_COMM_RATE)
     comm_rate[0] = INST0_COMM_RATE
@@ -434,12 +443,11 @@ def simulate(prc_all: np.ndarray, params: Params, num_test_days: int) -> Result:
     comm = 0.0
     pll: list[float] = []
 
-    start_day = nt - num_test_days
-    for t in range(start_day, nt + 1):
+    for t in range(start_day, end_day + 1):
         prc_so_far = prc_all[:, :t]
         cur_prices = prc_so_far[:, -1]
 
-        if t < nt:
+        if t < end_day:
             new_orig = strategy_positions(prc_so_far, cur_pos.astype(int), params)
             pos_limits = (dlr_limit / cur_prices).astype(int)
             new_pos = np.clip(new_orig, -pos_limits, pos_limits).astype(int)
@@ -464,6 +472,17 @@ def simulate(prc_all: np.ndarray, params: Params, num_test_days: int) -> Result:
     mu, std = float(np.mean(pll_arr)), float(np.std(pll_arr))
     sharpe = np.sqrt(250) * mu / std if std > 0 else 0.0
     return Result(mu, std, sharpe, _score(mu, std), tot_dvolume, pll_arr)
+
+
+def simulate(prc_all: np.ndarray, params: Params, num_test_days: int) -> Result:
+    """Day-by-day simulation identical in mechanics to eval.py's calcPL."""
+    nt = prc_all.shape[1]
+    return simulate_range(
+        prc_all,
+        params,
+        start_day=nt - num_test_days,
+        end_day=nt,
+    )
 
 
 # ── Robust evaluation: official score + overfit guards ────────────────────────
