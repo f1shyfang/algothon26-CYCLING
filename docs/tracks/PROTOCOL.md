@@ -6,12 +6,15 @@
 
 ---
 
-## Wave: Walk-forward R1/R2 (current)
+## Wave: Walk-forward R1/R2 (promoted 2026-07-13)
 
-**Research floor:** minimal-core `Params()` → `python loop.py` scores **211.49**
-(all overlays off: 5d/20d reversal, band=0.195, regime 10/60@1.15→0.22).
-Live `teamName.py` / `eval.py` may still show **265.18** until the lead
-promotes — use `loop.py` for floor checks during research ticks.
+**Current production/research floor:** `Params()` → `python loop.py` and
+`python eval.py` score **221.91**: minimal core (5d/20d reversal, band=0.195,
+regime 10/60@1.15→0.22) plus promoted
+`mpairs=40@0.20k3z1.50c0.65`. The prior **211.49** all-overlays-off floor was
+used for the recorded R1/R2 tick-1 reconciliation. The intentional reset from
+the old live OLS+algoscale score of **265.18** establishes this walk-forward
+winner as the new discovery floor.
 
 **Promote gates** (from `python loop.py --json`):
 - Majority of walk-forward folds F1–F3 beat baseline fold scores
@@ -21,8 +24,8 @@ promotes — use `loop.py` for floor checks during research ticks.
 
 | Track | Prefix | Doc |
 |:---|:---|:---|
-| **R1** — rolling OLS ALGO–basket | `ols_*` | `docs/tracks/R1.md` |
-| **R2** — multi-pair OLS | `mpairs_*` | `docs/tracks/R2.md` |
+| **R1** — rolling OLS ALGO–basket (parked) | `ols_*` | `docs/tracks/R1.md` |
+| **R2** — multi-pair OLS (promoted) | `mpairs_*` | `docs/tracks/R2.md` |
 
 ### Daily rhythm
 

@@ -690,6 +690,15 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** HOLD — promotable under the research gates, but not copied to `teamName.py` because this tick is track-isolated.
 - **Learnings:** The winner improves official score, F2, and F3 while giving back some F1, passing the two-of-three fold majority and recent-fold guard. Pair selection was active: `min_corr=0.55` candidates produced scores distinct from the floor (for example 198.77), so the result is not a zero-pair false reject. The sweep grid was reset to floor-only after logging.
 
+### Iteration 37 (Lead midday merge — promote R2)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** Reconcile the two walk-forward-promotable tracks and promote only the higher official scorer.
+- **Strategy:** Reconfirmed R1 `ols=40@0.30z2.00` at **218.81** and R2 `mpairs=40@0.20k3z1.50c0.65` at **221.91** against the **211.49** minimal-core research floor. Removed the old production OLS and ALGO signal scaling, ported R2's numpy-only multi-pair overlay, and synced `loop.py` defaults. No ensemble was attempted.
+- **Result:** R2 remained `promote: true`: official **221.91**, F1 **293.41**, F2 **171.47**, F3 **292.15**. Production `eval.py` and the new `Params()` floor both score **221.91**.
+- **Decision:** PROMOTED R2 only. R1 is parked for later ensemble research.
+- **Learnings:** The live score intentionally reset from the old-gate OLS+algoscale score of **265.18** to the walk-forward-selected minimal-core + multi-pair score of **221.91**. Future research starts from this new floor.
+
 ---
 
 > [!NOTE]

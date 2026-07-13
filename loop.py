@@ -79,12 +79,12 @@ class Params:
     ols_weight: float = 0.0
     ols_entry_z: float = 1.5
     ols_intercept: bool = False
-    # Track L2: multi-pair OLS (default off)
-    mpairs_lookback: int = 60
-    mpairs_weight: float = 0.0
-    mpairs_top_k: int = 5
-    mpairs_entry_z: float = 2.0
-    mpairs_min_corr: float = 0.85
+    # Track L2: multi-pair OLS (production overlay)
+    mpairs_lookback: int = 40
+    mpairs_weight: float = 0.20
+    mpairs_top_k: int = 3
+    mpairs_entry_z: float = 1.5
+    mpairs_min_corr: float = 0.65
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)

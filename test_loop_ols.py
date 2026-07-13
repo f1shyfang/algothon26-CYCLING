@@ -1,4 +1,4 @@
-"""Unit tests for loop.py OLS helpers and default-off invariance."""
+"""Unit tests for loop.py overlay helpers and production-floor invariance."""
 import unittest
 
 import numpy as np
@@ -54,10 +54,14 @@ class TestMinimalCoreFloor(unittest.TestCase):
         cls.prc = load_prices()
         cls.base = evaluate(cls.prc, Params())
 
-    def test_overlays_default_off(self):
+    def test_production_floor_fields(self):
         p = Params()
         self.assertEqual(p.ols_weight, 0.0)
-        self.assertEqual(p.mpairs_weight, 0.0)
+        self.assertEqual(p.mpairs_lookback, 40)
+        self.assertEqual(p.mpairs_weight, 0.20)
+        self.assertEqual(p.mpairs_top_k, 3)
+        self.assertEqual(p.mpairs_entry_z, 1.5)
+        self.assertEqual(p.mpairs_min_corr, 0.65)
         self.assertEqual(p.pairs_weight, 0.0)
         self.assertEqual(p.algo_signal_scale, 1.0)
         self.assertEqual(p.xs_weight, 0.0)
@@ -69,20 +73,20 @@ class TestMinimalCoreFloor(unittest.TestCase):
         self.assertAlmostEqual(a.score, b.score, places=2)
 
     def test_zero_mpairs_is_noop(self):
-        a = evaluate(self.prc, Params())
+        a = evaluate(self.prc, Params(mpairs_weight=0.0))
         b = evaluate(self.prc, Params(mpairs_weight=0.0, mpairs_lookback=80))
         self.assertAlmostEqual(a.score, b.score, places=2)
 
     def test_inactive_mpairs_does_not_dilute(self):
-        base = evaluate(self.prc, Params())
+        base = evaluate(self.prc, Params(mpairs_weight=0.0))
         cand = evaluate(
             self.prc,
             Params(mpairs_weight=0.10, mpairs_min_corr=0.85, mpairs_lookback=40),
         )
         self.assertAlmostEqual(cand.score, base.score, places=2)
 
-    def test_floor_score_is_positive(self):
-        self.assertGreater(self.base.score, 0.0)
+    def test_floor_score_matches_production(self):
+        self.assertAlmostEqual(self.base.score, 221.91, places=2)
 
 
 class TestSimulateRange(unittest.TestCase):
