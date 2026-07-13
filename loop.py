@@ -4,9 +4,8 @@
 This turns the manual process in STRATEGY_LOOP.md into an executable loop:
 
     1. Simulate a parameterised strategy with the *exact* scoring eval.py uses.
-    2. Score it not just on the official 250-day window, but also on a held-out
-       "train" window and on both 125-day halves of the test window, so we can
-       reject candidates that only win by overfitting the scored window.
+    2. Score it on the official 250-day window and three 100-day walk-forward
+       folds, so we can reject candidates that only win in one period.
     3. Sweep parameter grids, log every result to results.csv, print a
        leaderboard, and surface the best candidate that improves the official
        score *without* regressing the robustness checks.
@@ -485,18 +484,28 @@ def simulate(prc_all: np.ndarray, params: Params, num_test_days: int) -> Result:
     )
 
 
-# ── Robust evaluation: official score + overfit guards ────────────────────────
+# ── Robust evaluation: official score + walk-forward guards ──────────────────
+def _fold_bounds(
+    nt: int,
+) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
+    return (
+        (nt - 300, nt - 200),
+        (nt - 200, nt - 100),
+        (nt - 100, nt),
+    )
+
+
 @dataclass
 class Evaluation:
     params: Params
-    score: float          # official (last NUM_TEST_DAYS)
+    score: float
     mean_pl: float
     sharpe: float
     dvol: float
-    half1_score: float    # first 125 days of the test window
-    half2_score: float    # last 125 days of the test window
-    train_score: float    # earlier held-out window (not the scored one)
-    robust: bool          # passes overfit guards
+    fold1_score: float
+    fold2_score: float
+    fold3_score: float
+    robust: bool
 
     def row(self) -> dict:
         d = asdict(self.params)
@@ -506,47 +515,33 @@ class Evaluation:
             mean_pl=round(self.mean_pl, 2),
             sharpe=round(self.sharpe, 3),
             dvol=round(self.dvol, 0),
-            half1=round(self.half1_score, 2),
-            half2=round(self.half2_score, 2),
-            train=round(self.train_score, 2),
+            fold1=round(self.fold1_score, 2),
+            fold2=round(self.fold2_score, 2),
+            fold3=round(self.fold3_score, 2),
             robust=self.robust,
         )
         return d
 
 
 def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
-    """Score a candidate on the official window plus overfitting guards."""
-    official = simulate(prc_all, params, NUM_TEST_DAYS)
-
-    # Split the official 250-day PnL into two 125-day halves for stability.
-    half = len(official.pll) // 2
-    h1, h2 = official.pll[:half], official.pll[half:]
-    half1 = _score(float(np.mean(h1)), float(np.std(h1)))
-    half2 = _score(float(np.mean(h2)), float(np.std(h2)))
-
-    # "Train" window: score an earlier slice the official metric never touches
-    # (the 125 days immediately before the official test window), so a candidate
-    # cannot win purely by fitting the scored days.
+    """Score a candidate on the official window and three walk-forward folds."""
     nt = prc_all.shape[1]
-    train_prices = prc_all[:, : nt - NUM_TEST_DAYS]
-    train = simulate(train_prices, params, 125)
-
-    robust = (
-        official.mean_pl > 0
-        and half1 > 0
-        and half2 > 0
-        and train.mean_pl > 0
-    )
+    official = simulate(prc_all, params, NUM_TEST_DAYS)
+    f1, f2, f3 = _fold_bounds(nt)
+    r1 = simulate_range(prc_all, params, *f1)
+    r2 = simulate_range(prc_all, params, *f2)
+    r3 = simulate_range(prc_all, params, *f3)
+    fold_positive = bool(r1.score > 0 and r2.score > 0 and r3.score > 0)
     return Evaluation(
         params=params,
         score=official.score,
         mean_pl=official.mean_pl,
         sharpe=official.sharpe,
         dvol=official.dvol,
-        half1_score=half1,
-        half2_score=half2,
-        train_score=train.score,
-        robust=robust,
+        fold1_score=r1.score,
+        fold2_score=r2.score,
+        fold3_score=r3.score,
+        robust=fold_positive,
     )
 
 
@@ -559,7 +554,17 @@ def build_grid() -> list[Params]:
 def _result_fieldnames() -> list[str]:
     """Stable CSV column order: all Params fields, then evaluation metrics."""
     param_keys = [f.name for f in fields(Params)]
-    eval_keys = ("label", "score", "mean_pl", "sharpe", "dvol", "half1", "half2", "train", "robust")
+    eval_keys = (
+        "label",
+        "score",
+        "mean_pl",
+        "sharpe",
+        "dvol",
+        "fold1",
+        "fold2",
+        "fold3",
+        "robust",
+    )
     return param_keys + list(eval_keys)
 
 
@@ -580,15 +585,29 @@ def log_results(rows: list[dict], path: str) -> None:
         writer.writerows(rows)
 
 
+def mark_robust(base: Evaluation, cand: Evaluation) -> bool:
+    if not (
+        cand.fold1_score > 0
+        and cand.fold2_score > 0
+        and cand.fold3_score > 0
+    ):
+        return False
+    wins = sum(
+        [
+            cand.fold1_score > base.fold1_score,
+            cand.fold2_score > base.fold2_score,
+            cand.fold3_score > base.fold3_score,
+        ]
+    )
+    return bool(wins >= 2)
+
+
 def is_promotable(base: Evaluation, cand: Evaluation) -> bool:
-    """A candidate is promotable only if it beats the baseline official score,
-    passes every robustness guard, and does not sacrifice the weaker test half.
-    This is the single source of truth for the agent's promote/reject decision.
-    """
+    """Apply majority-fold, official-score, and recent-fold promotion gates."""
     return (
-        cand.robust
+        mark_robust(base, cand)
         and cand.score > base.score
-        and cand.half2_score >= base.half2_score * 0.95
+        and cand.fold3_score >= base.fold3_score * 0.95
     )
 
 
@@ -597,21 +616,23 @@ def run_sweep(prc_all: np.ndarray, baseline: Params, csv_path: str | None) -> No
     print(f"\nBaseline: {baseline.label()}")
     print(
         f"  score={base_eval.score:.2f}  sharpe={base_eval.sharpe:.3f}  "
-        f"half1={base_eval.half1_score:.2f}  half2={base_eval.half2_score:.2f}  "
-        f"train={base_eval.train_score:.2f}\n"
+        f"fold1={base_eval.fold1_score:.2f}  fold2={base_eval.fold2_score:.2f}  "
+        f"fold3={base_eval.fold3_score:.2f}\n"
     )
 
     grid = build_grid()
     evals = [evaluate(prc_all, p) for p in grid]
+    for e in evals:
+        e.robust = mark_robust(base_eval, e)
     evals.sort(key=lambda e: e.score, reverse=True)
 
-    print(f"{'score':>7} {'sharpe':>7} {'half1':>7} {'half2':>7} {'train':>7} {'ok':>3}  params")
+    print(f"{'score':>7} {'sharpe':>7} {'fold1':>7} {'fold2':>7} {'fold3':>7} {'ok':>3}  params")
     print("-" * 80)
     for e in evals:
         flag = "Y" if e.robust else "-"
         print(
-            f"{e.score:7.2f} {e.sharpe:7.3f} {e.half1_score:7.2f} "
-            f"{e.half2_score:7.2f} {e.train_score:7.2f} {flag:>3}  {e.params.label()}"
+            f"{e.score:7.2f} {e.sharpe:7.3f} {e.fold1_score:7.2f} "
+            f"{e.fold2_score:7.2f} {e.fold3_score:7.2f} {flag:>3}  {e.params.label()}"
         )
 
     if csv_path:
@@ -643,6 +664,8 @@ def verdict_json(prc_all: np.ndarray, baseline: Params, grid: list[Params]) -> d
     evals = sorted(
         (evaluate(prc_all, p) for p in grid), key=lambda e: e.score, reverse=True
     )
+    for e in evals:
+        e.robust = mark_robust(base_eval, e)
     winners = [e for e in evals if is_promotable(base_eval, e)]
     best = winners[0] if winners else None
     return {
@@ -677,7 +700,10 @@ def main() -> None:
         print(f"  mean(PL): {e.mean_pl:.1f}")
         print(f"  annSharpe: {e.sharpe:.2f}")
         print(f"  Score: {e.score:.2f}")
-        print(f"  half1/half2/train: {e.half1_score:.2f} / {e.half2_score:.2f} / {e.train_score:.2f}")
+        print(
+            f"  fold1/fold2/fold3: {e.fold1_score:.2f} / "
+            f"{e.fold2_score:.2f} / {e.fold3_score:.2f}"
+        )
         print("\nRun `python loop.py --sweep` to search for improvements.")
 
 

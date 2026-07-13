@@ -101,5 +101,46 @@ class TestSimulateRange(unittest.TestCase):
         self.assertEqual(len(r.pll), 100)
 
 
+class TestWalkForwardPromote(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.prc = load_prices()
+
+    def test_evaluate_exposes_three_folds(self):
+        e = evaluate(self.prc, Params())
+        self.assertTrue(hasattr(e, "fold1_score"))
+        self.assertTrue(hasattr(e, "fold2_score"))
+        self.assertTrue(hasattr(e, "fold3_score"))
+        self.assertIsInstance(e.robust, bool)
+
+    def test_baseline_not_promotable_against_itself(self):
+        base = evaluate(self.prc, Params())
+        self.assertFalse(is_promotable(base, base))
+
+    def test_promotable_requires_majority_and_official_and_f3(self):
+        from dataclasses import replace
+
+        base = evaluate(self.prc, Params())
+        good = replace(
+            base,
+            score=base.score + 1.0,
+            fold1_score=base.fold1_score + 1.0,
+            fold2_score=base.fold2_score + 1.0,
+            fold3_score=base.fold3_score,
+            robust=True,
+        )
+        self.assertTrue(is_promotable(base, good))
+
+        weak = replace(
+            base,
+            score=base.score + 5.0,
+            fold1_score=base.fold1_score + 1.0,
+            fold2_score=base.fold2_score - 1.0,
+            fold3_score=base.fold3_score - 1.0,
+            robust=False,
+        )
+        self.assertFalse(is_promotable(base, weak))
+
+
 if __name__ == "__main__":
     unittest.main()
