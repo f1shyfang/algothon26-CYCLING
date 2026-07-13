@@ -56,7 +56,7 @@ class TestMinimalCoreFloor(unittest.TestCase):
 
     def test_production_floor_fields(self):
         p = Params()
-        self.assertEqual(p.ols_weight, 0.0)
+        self.assertEqual(p.ols_weight, 0.20)
         self.assertEqual(p.mpairs_lookback, 40)
         self.assertEqual(p.mpairs_weight, 0.20)
         self.assertEqual(p.mpairs_top_k, 3)
@@ -66,6 +66,9 @@ class TestMinimalCoreFloor(unittest.TestCase):
         self.assertEqual(p.algo_signal_scale, 1.0)
         self.assertEqual(p.xs_weight, 0.0)
         self.assertEqual(p.momentum_weight, 0.0)
+        self.assertEqual(p.vol_target_lookback, 20)
+        self.assertEqual(p.vol_target_floor, 0.70)
+        self.assertEqual(p.vol_target_cap, 2.0)
 
     def test_zero_ols_lookback_change_is_noop(self):
         a = evaluate(self.prc, Params(ols_weight=0.0))
@@ -86,7 +89,7 @@ class TestMinimalCoreFloor(unittest.TestCase):
         self.assertAlmostEqual(cand.score, base.score, places=2)
 
     def test_floor_score_matches_production(self):
-        self.assertAlmostEqual(self.base.score, 221.91, places=2)
+        self.assertAlmostEqual(self.base.score, 249.91, places=2)
 
 
 class TestSimulateRange(unittest.TestCase):

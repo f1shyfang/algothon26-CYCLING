@@ -91,6 +91,10 @@ class Params:
     # Asymmetric signal clipping (1.0 = symmetric/off)
     signal_clip_long: float = 1.0  # clip for positive z-scores (long signals)
     signal_clip_short: float = 1.0  # clip for negative z-scores (short signals)
+    # Vol-targeted position sizing: scale dollar limit by inverse rolling vol per instrument (0 = off)
+    vol_target_lookback: int = 20  # lookback for rolling vol; 0 => disabled
+    vol_target_floor: float = 0.7  # min scale
+    vol_target_cap: float = 2.0  # max scale
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)
@@ -155,11 +159,16 @@ class Params:
         asym = ""
         if self.signal_clip_long != 1.0 or self.signal_clip_short != 1.0:
             asym = f" clipL={self.signal_clip_long:.2f} clipS={self.signal_clip_short:.2f}"
+        vt = (
+            f" vt={self.vol_target_lookback}@{self.vol_target_floor:.2f}-{self.vol_target_cap:.2f}"
+            if self.vol_target_lookback > 0
+            else ""
+        )
         return (
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
             f"{clip}{mom}{regime}{ema}{xs}{pairs}{algo_scale}{algo_hedge}"
-            f"{ols}{mpairs}{adapt}{asym}"
+            f"{ols}{mpairs}{adapt}{asym}{vt}"
         )
 
 
@@ -344,6 +353,8 @@ def strategy_positions(
         need = max(need, params.mpairs_lookback)
     if params.adaptive_band_vol_lb > 0:
         need = max(need, params.adaptive_band_vol_lb)
+    if params.vol_target_lookback > 0:
+        need = max(need, params.vol_target_lookback)
     recent = prc_so_far[:, -(need + 1):]
     log_prices = np.log(recent)
     daily_returns = np.diff(log_prices, axis=1)
@@ -416,6 +427,14 @@ def strategy_positions(
         long_vol = daily_returns[:, -long_n:].std(axis=1)
         ratio = short_vol / np.maximum(long_vol, VOLATILITY_FLOOR)
         exposure = np.where(ratio >= params.regime_threshold, params.regime_scale, 1.0)
+    # Vol-targeted position sizing: scale dollar limits by inverse rolling vol
+    if params.vol_target_lookback > 0:
+        vt_lb = params.vol_target_lookback
+        inst_vol = daily_returns[:, -vt_lb:].std(axis=1)
+        median_vol = float(np.median(inst_vol))
+        vt_scale = median_vol / np.maximum(inst_vol, VOLATILITY_FLOOR)
+        vt_scale = np.clip(vt_scale, params.vol_target_floor, params.vol_target_cap)
+        dollar_limits *= vt_scale
     target_dollars = dollar_limits * np.clip(signal, -1.0, 1.0) * exposure
     current_prices = prc_so_far[:, -1]
     desired = np.trunc(target_dollars / current_prices).astype(int)
@@ -433,7 +452,11 @@ def strategy_positions(
     should_rebalance = rebalance_notional >= band * dollar_limits
     new_positions = np.where(should_rebalance, desired, prev_positions)
 
-    max_shares = np.trunc(dollar_limits / current_prices).astype(int)
+    # Vol targeting adjusts provisional allocation and rebalance thresholds,
+    # but eval.py enforces the fixed per-instrument position limits.
+    position_limits = np.full(nins, params.default_dollar_limit, dtype=float)
+    position_limits[0] = params.algo_dollar_limit
+    max_shares = np.trunc(position_limits / current_prices).astype(int)
     return np.clip(new_positions, -max_shares, max_shares)
 
 
@@ -591,7 +614,18 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 
 # ── The loop: sweep, log, leaderboard, promote ────────────────────────────────
 def build_grid() -> list[Params]:
-    return [Params()]
+    base = Params()
+    grid = [base]
+    # Vol-targeted position sizing: lookback ∈ {20, 60}, floor ∈ {0.5, 0.7}, cap ∈ {1.5, 2.0}
+    for vt_lb in [20, 60]:
+        for vt_floor in [0.5, 0.7]:
+            for vt_cap in [1.5, 2.0]:
+                grid.append(Params(
+                    vol_target_lookback=vt_lb,
+                    vol_target_floor=vt_floor,
+                    vol_target_cap=vt_cap,
+                ))
+    return grid
 
 
 def _result_fieldnames() -> list[str]:

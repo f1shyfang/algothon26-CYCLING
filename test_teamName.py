@@ -38,6 +38,23 @@ class PositionTests(unittest.TestCase):
 
         self.assertTrue(np.all(positions > 0))
 
+    def test_vol_targeting_keeps_returned_positions_within_official_limits(self):
+        # Instrument 1 has much lower volatility than the rest, which drives
+        # its inverse-vol allocation to the configured 2x cap.
+        days = MIN_HISTORY
+        prices = np.full((N_INSTRUMENTS, days), 100.0)
+        prices[0] = 100.0 * np.exp(np.linspace(0.0, 0.2, days))
+        prices[1] = 100.0 * np.exp(np.linspace(0.0, 0.02, days))
+        for instrument in range(2, N_INSTRUMENTS):
+            prices[instrument] = 100.0 * np.exp(
+                np.linspace(0.0, 0.2, days) + 0.01 * np.sin(np.arange(days))
+            )
+
+        positions = getMyPosition(prices)
+        limits = np.full(N_INSTRUMENTS, 10_000.0)
+        limits[0] = 100_000.0
+        self.assertTrue(np.all(np.abs(positions * prices[:, -1]) <= limits))
+
     def test_constant_prices_produce_zero_positions(self):
         prices = np.full((N_INSTRUMENTS, MIN_HISTORY), 100.0)
 

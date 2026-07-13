@@ -246,6 +246,7 @@ python eval.py
 | 35 | Lead promote R2 | mpairs=40@0.20k3z1.50c0.65 | 262.16 | — | 2.35 | 221.91 | — | R2 promoted to new floor |
 | 36 | Track R1+R2 OLS+mpairs sweep | ols=40@0.20z2.00 + mpairs | 269.68 | 1646.44 | 2.59 | 234.69 | 30,455,064 | Vectorized corr speedup, OLS additive on mpairs |
 | 37 | Adaptive band (promoted) | adapt=10@2.00, band 0.195 | 273.22 | 1638.85 | 2.64 | 238.85 | 29,261,309 | Widen band 2× when median short/long vol ratio ≥ 1 |
+| 38 | Vol-targeted sizing (promoted) | 20d inverse-vol, 70%-200% cap | 288.59 | 1794.96 | 2.54 | 249.91 | 31,352,860 | Official-limit-aligned simulation; wins F1/F2 and preserves 96.7% of F3 |
 
 ---
 
@@ -759,3 +760,13 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** DISCARD. Baseline holds at **238.85**.
 - **Learnings:** Tighter short clip (clipS < 1) improves Sharpe by cutting noisy long signals but collapses F1/F3 — the lost edge on calm-vol reversals outweighs noise reduction. Wider long clip (clipL > 1) adds noise without edge. Asymmetric clip alone is not a free lunch here. Next: try **vol-targeted position sizing** — scale target dollar exposure per instrument by inverse rolling vol (distinct from regime cut which is binary and portfolio-wide), to equalise risk contribution across instruments.
 
+---
+
+### Iteration 42 (Vol-targeted sizing)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** Per-instrument inverse-vol sizing over 20 days can improve risk-adjusted returns beyond the existing binary regime cut by redistributing provisional signal allocation toward lower-vol instruments.
+- **Strategy:** Applied a 20-day inverse-vol multiplier to provisional dollar allocations, clipped to 70%-200% of the nominal per-instrument allocation. Aligned `teamName.py` and `loop.py` state limits with `eval.py`'s fixed $100K/$10K caps; the scaled limit is used only for allocation and rebalance thresholding.
+- **Result:** Against the prior no-target floor (score **238.85**, F1 **276.58**, F2 **192.17**, F3 **316.81**), the 20-day 70%-200% configuration scored **249.91** (Mean PL **288.59**, Sharpe **2.542**, F1 **309.84**, F2 **195.18**, F3 **306.46**). It passes the majority-fold and F3 gates. The 60-day extension reached **253.22** but lost F1 and F2, so `promote: false` for that extension.
+- **Decision:** KEEP & HARDEN. New verified baseline **249.91**.
+- **Learnings:** Vol targeting is beneficial at 20 days but not at 60 days. The limit alignment fixed a reproducible `eval.py`/research mismatch caused by retaining positions outside the evaluator's static caps.

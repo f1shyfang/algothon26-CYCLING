@@ -19,6 +19,9 @@ OLS_WEIGHT = 0.20
 OLS_ENTRY_Z = 2.0
 ADAPTIVE_BAND_VOL_LB = 10
 ADAPTIVE_BAND_SCALE = 2.0
+VOL_TARGET_LOOKBACK = 20
+VOL_TARGET_FLOOR = 0.7
+VOL_TARGET_CAP = 2.0
 
 _current_positions = np.zeros(0, dtype=int)
 _last_history = np.zeros((0, 0))
@@ -96,6 +99,8 @@ def getMyPosition(prcSoFar):
     longest_lookback = max(max(LOOKBACKS), REGIME_VOL_LONG, MPAIRS_LOOKBACK, OLS_LOOKBACK)
     if ADAPTIVE_BAND_VOL_LB > 0:
         longest_lookback = max(longest_lookback, ADAPTIVE_BAND_VOL_LB)
+    if VOL_TARGET_LOOKBACK > 0:
+        longest_lookback = max(longest_lookback, VOL_TARGET_LOOKBACK)
 
     same_history = _last_history.shape == prcSoFar.shape and np.array_equal(
         _last_history,
@@ -152,6 +157,13 @@ def getMyPosition(prcSoFar):
 
     dollar_limits = np.full(nins, DEFAULT_DOLLAR_LIMIT, dtype=float)
     dollar_limits[0] = ALGO_DOLLAR_LIMIT
+    # Vol-targeted position sizing: scale dollar limit by inverse rolling vol per instrument
+    if VOL_TARGET_LOOKBACK > 0 and daily_returns.shape[1] >= VOL_TARGET_LOOKBACK:
+        inst_vol = daily_returns[:, -VOL_TARGET_LOOKBACK:].std(axis=1)
+        median_vol = float(np.median(inst_vol))
+        vt_scale = median_vol / np.maximum(inst_vol, VOLATILITY_FLOOR)
+        vt_scale = np.clip(vt_scale, VOL_TARGET_FLOOR, VOL_TARGET_CAP)
+        dollar_limits *= vt_scale
     target_dollars = dollar_limits * np.clip(signal, -1.0, 1.0) * exposure
     current_prices = prcSoFar[:, -1]
     desired_positions = np.trunc(target_dollars / current_prices).astype(int)
@@ -171,7 +183,12 @@ def getMyPosition(prcSoFar):
         _current_positions,
     )
 
-    max_shares = np.trunc(dollar_limits / current_prices).astype(int)
+    # The evaluator clips submitted positions at these fixed limits. Keep the
+    # local band state on the same bounds even when vol targeting scales a
+    # signal's provisional allocation above them.
+    position_limits = np.full(nins, DEFAULT_DOLLAR_LIMIT, dtype=float)
+    position_limits[0] = ALGO_DOLLAR_LIMIT
+    max_shares = np.trunc(position_limits / current_prices).astype(int)
     _current_positions = np.clip(new_positions, -max_shares, max_shares)
     _last_history = prcSoFar.copy()
     return _current_positions.copy()
