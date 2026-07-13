@@ -681,6 +681,15 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Decision:** HOLD — promotable under the research gates, but not copied to `teamName.py` because this tick is track-isolated.
 - **Learnings:** The winner improves official score, F2, and F3 while giving back some F1; it passes the two-of-three fold majority and recent-fold floor. The sweep grid was reset to floor-only after logging.
 
+### Iteration 36 (Track R2 tick 1 — multi-pair OLS under walk-forward gates)
+
+- **Date:** 2026-07-13
+- **Hypothesis:** Corr-screened OLS residuals among non-ALGO instruments add diversified mean-reversion edge to the minimal-core research floor when correlation thresholds are low enough to select active pairs.
+- **Strategy:** Grid: `mpairs_lookback∈{40,60} × mpairs_top_k∈{3,5} × mpairs_weight∈{0.10,0.20} × mpairs_entry_z∈{1.5,2.0} × mpairs_min_corr∈{0.55,0.65,0.70}`, plus the floor. Live `teamName.py` remained frozen.
+- **Result:** Floor = official **211.49**, F1 **312.09**, F2 **163.64**, F3 **265.88**. Winner `mpairs=40@0.20k3z1.50c0.65` = official **221.91**, F1 **293.41**, F2 **171.47**, F3 **292.15**, Mean PL **262.16**, Sharpe **2.348**. `promote: true` (+10.42).
+- **Decision:** HOLD — promotable under the research gates, but not copied to `teamName.py` because this tick is track-isolated.
+- **Learnings:** The winner improves official score, F2, and F3 while giving back some F1, passing the two-of-three fold majority and recent-fold guard. Pair selection was active: `min_corr=0.55` candidates produced scores distinct from the floor (for example 198.77), so the result is not a zero-pair false reject. The sweep grid was reset to floor-only after logging.
+
 ---
 
 > [!NOTE]
