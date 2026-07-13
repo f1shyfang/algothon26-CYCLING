@@ -11,11 +11,11 @@
 
 Maximise the Algothon score on the last 250 days of `prices.txt`:
 `score = μ × SR² / (SR² + 1)`, where `SR = √250 · μ/σ` of daily PnL.
-Research baseline (`Params()` minimal core in `loop.py`): **score = 211.49**
+Research baseline (`Params()` in `loop.py`): **score = 221.91**
 (5d/20d volatility-standardised reversal, 19.5% rebalance band, high-vol
-regime cut 10d/60d @ 1.15 → 22% exposure; all overlays off). Live
-`teamName.py` may still score **265.18** until the lead promotes — do not
-treat `eval.py` as the research floor during walk-forward ticks.
+regime cut 10d/60d @ 1.15 → 22% exposure; plus promoted
+`mpairs=40@0.20k3z1.5c0.65`). Live `teamName.py` and research now match after
+Task 8 promote — `python eval.py` and `python loop.py` both reproduce **221.91**.
 
 The agent's job is to **raise the baseline** — or prove it can't be beaten this
 round and say so. A non-improving iteration that is honestly rejected is a
@@ -138,7 +138,7 @@ stopping criterion is met.
 ## Why this converges (not just churns)
 
 - **Ground truth is frozen** (`eval.py`) and the harness mirrors its scoring
-  (`loop.py` reproduces the research floor **211.49** on minimal-core `Params()`),
+  (`loop.py` reproduces the research floor **221.91** on `Params()`),
   so score deltas are trustworthy.
 - **The promote gate requires walk-forward survival** (majority folds + official
   ↑ + F3 ≥ 0.95×base F3), so the loop can only ratchet the baseline *up* on

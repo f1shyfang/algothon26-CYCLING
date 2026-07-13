@@ -35,8 +35,8 @@ Morning assign  →  Parallel ticks  →  Midday merge  →  Evening log
 ```
 
 **Morning assign (lead)**
-1. Confirm research floor: `python loop.py` → official score **211.49** (not
-   `eval.py` until after a promote).
+1. Confirm research floor: `python loop.py` and `python eval.py` both → official
+   score **221.91** (live and research match after Task 8 promote).
 2. Read each `docs/tracks/{R1,R2}.md` reject memory and prior tick log.
 3. Assign exactly **one** untried hypothesis per track — never re-assign a
    hypothesis already in a track's reject memory.
