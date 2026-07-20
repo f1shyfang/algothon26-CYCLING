@@ -6,8 +6,23 @@ from teamName import getMyPosition
 
 
 N_INSTRUMENTS = 51
-# Must exceed max(LOOKBACKS, REGIME_VOL_LONG) so signals are active.
-MIN_HISTORY = 61
+# Must exceed the production lead-lag lookback so signals are active.
+MIN_HISTORY = 340
+
+
+def make_leadlag_prices(final_leader_return):
+    rng = np.random.default_rng(26)
+    days = 360
+    returns = rng.normal(0.0, 0.002, (N_INSTRUMENTS, days - 1))
+    leader_returns = rng.normal(0.0, 0.015, days - 2)
+    returns[0, :-1] = leader_returns
+    returns[1, 1:] = 0.8 * leader_returns + rng.normal(0.0, 0.001, days - 2)
+    returns[0, -1] = final_leader_return
+    log_prices = np.concatenate(
+        [np.zeros((N_INSTRUMENTS, 1)), np.cumsum(returns, axis=1)],
+        axis=1,
+    )
+    return 100.0 * np.exp(log_prices)
 
 
 class PositionTests(unittest.TestCase):
@@ -18,29 +33,27 @@ class PositionTests(unittest.TestCase):
 
         np.testing.assert_array_equal(positions, np.zeros(N_INSTRUMENTS, dtype=int))
 
-    def test_rising_prices_produce_bounded_short_positions(self):
-        prices = np.exp(np.linspace(0.0, 0.2, MIN_HISTORY))[None, :]
-        prices = np.repeat(prices, N_INSTRUMENTS, axis=0) * 100.0
+    def test_positive_leader_return_produces_long_follower_position(self):
+        prices = make_leadlag_prices(0.08)
 
         positions = getMyPosition(prices)
 
-        self.assertTrue(np.all(positions < 0))
+        self.assertGreater(positions[1], 0)
         self.assertLessEqual(abs(positions[0] * prices[0, -1]), 100_000)
         self.assertTrue(
             np.all(np.abs(positions[1:] * prices[1:, -1]) <= 10_000)
         )
 
-    def test_falling_prices_produce_long_positions(self):
-        prices = np.exp(np.linspace(0.2, 0.0, MIN_HISTORY))[None, :]
-        prices = np.repeat(prices, N_INSTRUMENTS, axis=0) * 100.0
+    def test_negative_leader_return_produces_short_follower_position(self):
+        prices = make_leadlag_prices(-0.08)
 
         positions = getMyPosition(prices)
 
-        self.assertTrue(np.all(positions > 0))
+        self.assertLess(positions[1], 0)
 
     def test_vol_targeting_keeps_returned_positions_within_official_limits(self):
         # Instrument 1 has much lower volatility than the rest, which drives
-        # its inverse-vol allocation to the configured 2x cap.
+        # its inverse-vol allocation to the configured cap.
         days = MIN_HISTORY
         prices = np.full((N_INSTRUMENTS, days), 100.0)
         prices[0] = 100.0 * np.exp(np.linspace(0.0, 0.2, days))

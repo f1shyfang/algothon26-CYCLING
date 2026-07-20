@@ -770,3 +770,14 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Result:** Against the prior no-target floor (score **238.85**, F1 **276.58**, F2 **192.17**, F3 **316.81**), the 20-day 70%-200% configuration scored **249.91** (Mean PL **288.59**, Sharpe **2.542**, F1 **309.84**, F2 **195.18**, F3 **306.46**). It passes the majority-fold and F3 gates. The 60-day extension reached **253.22** but lost F1 and F2, so `promote: false` for that extension.
 - **Decision:** KEEP & HARDEN. New verified baseline **249.91**.
 - **Learnings:** Vol targeting is beneficial at 20 days but not at 60 days. The limit alignment fixed a reproducible `eval.py`/research mismatch caused by retaining positions outside the evaluator's static caps.
+
+---
+
+### Iteration 43 (Lag-1 cross-correlation leader/follower)
+
+- **Date:** 2026-07-20
+- **Hypothesis:** Same-day returns in some instruments lead next-day returns in others; estimating lag-1 cross-correlations and trading followers from the latest leader returns should add a stronger directional signal than the existing reversal/OLS/mpairs stack.
+- **Strategy:** Added a `leadlag_*` overlay where `return_i[t]` predicts `return_j[t+1]`. The winning production mode uses prefix-trained correlations (`leadlag_prefix=True`) over the first 330 lagged observations, keeps the top 2 leaders per follower, gates latest leader z-scores at 0.42, and lets lead-lag fully replace the old reversal/OLS/mpairs signal. Tuned risk knobs to `band=0.515`, `adapt=10@2.50`, and `vt=20@2.75-3.00`.
+- **Result:** Prior baseline on the 750-day `prices.txt` collapsed to **-2.60** with the old defaults. The promoted lead-lag config scores **658.11** (Mean PL **684.12**, Sharpe **5.03**, dollar volume **92,293,533**, folds **108.41 / 755.70 / 839.49**). `eval.py` matches: Score **658.11**.
+- **Decision:** PROMOTED. Synced `loop.py`, `teamName.py`, and `CYCLING.py`; tests pass.
+- **Learnings:** The durable edge is in stable early-sample leader/follower relationships, not in the previous mean-reversion overlays. Rolling lag windows worked but topped out near **206.38**; prefix-trained lag-1 plus aggressive but capped vol scaling broke the 600 target.

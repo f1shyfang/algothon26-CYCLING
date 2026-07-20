@@ -4,24 +4,31 @@ LOOKBACKS = (5, 20)
 DEFAULT_DOLLAR_LIMIT = 10_000
 ALGO_DOLLAR_LIMIT = 100_000
 VOLATILITY_FLOOR = 1e-12
-REBALANCE_BAND = 0.195
+REBALANCE_BAND = 0.515
 REGIME_VOL_SHORT = 10
 REGIME_VOL_LONG = 60
 REGIME_THRESHOLD = 1.15
-REGIME_SCALE = 0.22
+REGIME_SCALE = 1.0
 MPAIRS_LOOKBACK = 40
-MPAIRS_WEIGHT = 0.20
+MPAIRS_WEIGHT = 0.0
 MPAIRS_TOP_K = 3
 MPAIRS_ENTRY_Z = 1.5
 MPAIRS_MIN_CORR = 0.65
 OLS_LOOKBACK = 40
-OLS_WEIGHT = 0.20
+OLS_WEIGHT = 0.0
 OLS_ENTRY_Z = 2.0
+LEADLAG_LOOKBACK = 330
+LEADLAG_MIN_OBS = 80
+LEADLAG_WEIGHT = 1.0
+LEADLAG_TOP_K = 2
+LEADLAG_ENTRY_Z = 0.42
+LEADLAG_MIN_CORR = 0.0
+LEADLAG_PREFIX = True
 ADAPTIVE_BAND_VOL_LB = 10
-ADAPTIVE_BAND_SCALE = 2.0
+ADAPTIVE_BAND_SCALE = 2.5
 VOL_TARGET_LOOKBACK = 20
-VOL_TARGET_FLOOR = 0.7
-VOL_TARGET_CAP = 2.0
+VOL_TARGET_FLOOR = 2.75
+VOL_TARGET_CAP = 3.0
 
 _current_positions = np.zeros(0, dtype=int)
 _last_history = np.zeros((0, 0))
@@ -92,6 +99,68 @@ def _mpairs_signal(log_prices, daily_returns):
     return np.clip(sig / max_abs, -1.0, 1.0)
 
 
+def _leadlag_signal(daily_returns):
+    nins, nret = daily_returns.shape
+    if nret < LEADLAG_MIN_OBS + 1:
+        return np.zeros(nins)
+
+    if LEADLAG_LOOKBACK > 0:
+        lb = min(LEADLAG_LOOKBACK, nret - 1)
+    else:
+        lb = nret - 1
+    if lb < LEADLAG_MIN_OBS:
+        return np.zeros(nins)
+
+    if LEADLAG_PREFIX:
+        leader = daily_returns[:, :lb]
+        follower = daily_returns[:, 1 : lb + 1]
+    else:
+        leader = daily_returns[:, -(lb + 1) : -1]
+        follower = daily_returns[:, -lb:]
+
+    leader_mu = leader.mean(axis=1, keepdims=True)
+    follower_mu = follower.mean(axis=1, keepdims=True)
+    leader_sd = leader.std(axis=1, keepdims=True)
+    follower_sd = follower.std(axis=1, keepdims=True)
+    valid_leader = leader_sd[:, 0] >= VOLATILITY_FLOOR
+    valid_follower = follower_sd[:, 0] >= VOLATILITY_FLOOR
+    if not np.any(valid_leader) or not np.any(valid_follower):
+        return np.zeros(nins)
+
+    leader_z = (leader - leader_mu) / np.maximum(leader_sd, VOLATILITY_FLOOR)
+    follower_z = (follower - follower_mu) / np.maximum(follower_sd, VOLATILITY_FLOOR)
+    corr = leader_z @ follower_z.T / lb
+    corr[~valid_leader, :] = 0.0
+    corr[:, ~valid_follower] = 0.0
+    np.fill_diagonal(corr, 0.0)
+
+    latest = daily_returns[:, -1]
+    latest_z = (latest - leader_mu[:, 0]) / np.maximum(leader_sd[:, 0], VOLATILITY_FLOOR)
+    if LEADLAG_ENTRY_Z > 0:
+        latest_z = np.where(np.abs(latest_z) >= LEADLAG_ENTRY_Z, latest_z, 0.0)
+    latest_z[~valid_leader] = 0.0
+
+    weights = corr.copy()
+    abs_weights = np.abs(weights)
+    if LEADLAG_TOP_K > 0 and LEADLAG_TOP_K < nins:
+        keep = np.zeros_like(weights, dtype=bool)
+        idx = np.argpartition(abs_weights, -LEADLAG_TOP_K, axis=0)[
+            -LEADLAG_TOP_K :,
+            :,
+        ]
+        keep[idx, np.arange(nins)[None, :]] = True
+        weights[~keep] = 0.0
+    weights[abs_weights < LEADLAG_MIN_CORR] = 0.0
+
+    denom = np.sum(np.abs(weights), axis=0)
+    sig = np.zeros(nins)
+    active = denom > VOLATILITY_FLOOR
+    if np.any(active):
+        sig[active] = latest_z @ weights[:, active] / denom[active]
+
+    return np.clip(sig, -1.0, 1.0)
+
+
 def getMyPosition(prcSoFar):
     global _current_positions, _last_history
 
@@ -101,6 +170,11 @@ def getMyPosition(prcSoFar):
         longest_lookback = max(longest_lookback, ADAPTIVE_BAND_VOL_LB)
     if VOL_TARGET_LOOKBACK > 0:
         longest_lookback = max(longest_lookback, VOL_TARGET_LOOKBACK)
+    if LEADLAG_WEIGHT > 0:
+        lag_need = LEADLAG_MIN_OBS + 1
+        if LEADLAG_LOOKBACK > 0:
+            lag_need = max(lag_need, LEADLAG_LOOKBACK + 1)
+        longest_lookback = max(longest_lookback, lag_need)
 
     same_history = _last_history.shape == prcSoFar.shape and np.array_equal(
         _last_history,
@@ -121,34 +195,45 @@ def getMyPosition(prcSoFar):
         _last_history = prcSoFar.copy()
         return _current_positions.copy()
 
-    recent_prices = prcSoFar[:, -(longest_lookback + 1) :]
+    if LEADLAG_WEIGHT > 0 and LEADLAG_PREFIX:
+        recent_prices = prcSoFar
+    else:
+        recent_prices = prcSoFar[:, -(longest_lookback + 1) :]
     log_prices = np.log(recent_prices)
     daily_returns = np.diff(log_prices, axis=1)
 
+    leadlag_replaces = LEADLAG_WEIGHT >= 1.0
     signal = np.zeros(nins)
-    for lookback in LOOKBACKS:
-        cumulative_return = log_prices[:, -1] - log_prices[:, -(lookback + 1)]
-        volatility = daily_returns[:, -lookback:].std(axis=1) * np.sqrt(lookback)
-        standardized_return = cumulative_return / np.maximum(
-            volatility, VOLATILITY_FLOOR
-        )
-        signal -= np.clip(standardized_return, -1.0, 1.0) / len(LOOKBACKS)
+    if not leadlag_replaces:
+        for lookback in LOOKBACKS:
+            cumulative_return = log_prices[:, -1] - log_prices[:, -(lookback + 1)]
+            volatility = daily_returns[:, -lookback:].std(axis=1) * np.sqrt(lookback)
+            standardized_return = cumulative_return / np.maximum(
+                volatility, VOLATILITY_FLOOR
+            )
+            signal -= np.clip(standardized_return, -1.0, 1.0) / len(LOOKBACKS)
 
-    if OLS_WEIGHT > 0 and nt > OLS_LOOKBACK:
-        basket = np.nanmean(log_prices[1:, :], axis=0)
-        algo = log_prices[0, :]
-        beta = _rolling_ols_beta(algo, basket, OLS_LOOKBACK)
-        spread = algo - beta * basket
-        z = _spread_z(spread, OLS_LOOKBACK)
-        if abs(z) >= OLS_ENTRY_Z:
-            ols_sig = np.zeros(nins)
-            ols_sig[0] = -np.clip(z, -1.0, 1.0)
-            ols_sig[1:] = -ols_sig[0] / (nins - 1)
-            signal = (1.0 - OLS_WEIGHT) * signal + OLS_WEIGHT * ols_sig
+        if OLS_WEIGHT > 0 and nt > OLS_LOOKBACK:
+            basket = np.nanmean(log_prices[1:, :], axis=0)
+            algo = log_prices[0, :]
+            beta = _rolling_ols_beta(algo, basket, OLS_LOOKBACK)
+            spread = algo - beta * basket
+            z = _spread_z(spread, OLS_LOOKBACK)
+            if abs(z) >= OLS_ENTRY_Z:
+                ols_sig = np.zeros(nins)
+                ols_sig[0] = -np.clip(z, -1.0, 1.0)
+                ols_sig[1:] = -ols_sig[0] / (nins - 1)
+                signal = (1.0 - OLS_WEIGHT) * signal + OLS_WEIGHT * ols_sig
 
-    mpairs_signal = _mpairs_signal(log_prices, daily_returns)
-    if np.any(np.abs(mpairs_signal) > VOLATILITY_FLOOR):
-        signal = (1.0 - MPAIRS_WEIGHT) * signal + MPAIRS_WEIGHT * mpairs_signal
+        if MPAIRS_WEIGHT > 0:
+            mpairs_signal = _mpairs_signal(log_prices, daily_returns)
+            if np.any(np.abs(mpairs_signal) > VOLATILITY_FLOOR):
+                signal = (1.0 - MPAIRS_WEIGHT) * signal + MPAIRS_WEIGHT * mpairs_signal
+
+    if LEADLAG_WEIGHT > 0:
+        leadlag_signal = _leadlag_signal(daily_returns)
+        if np.any(np.abs(leadlag_signal) > VOLATILITY_FLOOR):
+            signal = (1.0 - LEADLAG_WEIGHT) * signal + LEADLAG_WEIGHT * leadlag_signal
 
     short_vol = daily_returns[:, -REGIME_VOL_SHORT:].std(axis=1)
     long_vol = daily_returns[:, -REGIME_VOL_LONG:].std(axis=1)

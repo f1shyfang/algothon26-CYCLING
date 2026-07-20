@@ -48,7 +48,7 @@ VOLATILITY_FLOOR = 1e-12
 class Params:
     lookbacks: tuple[int, ...] = (5, 20)
     weights: tuple[float, ...] | None = None  # None => equal weight
-    rebalance_band: float = 0.195
+    rebalance_band: float = 0.515
     algo_dollar_limit: float = 100_000.0
     default_dollar_limit: float = 10_000.0
     signal_clip: float = 1.0
@@ -59,7 +59,7 @@ class Params:
     regime_vol_short: int = 10
     regime_vol_long: int = 60
     regime_threshold: float = 1.15
-    regime_scale: float = 0.22
+    regime_scale: float = 1.0
     # Signal EMA blend with prior-day signal (1.0 = off / use today only)
     signal_ema_alpha: float = 1.0
     # Track A: cross-sectional overlay (default off)
@@ -76,25 +76,34 @@ class Params:
     algo_hedge_weight: float = 0.0
     # Track L1: rolling OLS ALGO-vs-basket (default off)
     ols_lookback: int = 40
-    ols_weight: float = 0.20
+    ols_weight: float = 0.0
     ols_entry_z: float = 2.0
     ols_intercept: bool = False
     # Track L2: multi-pair OLS (production overlay)
     mpairs_lookback: int = 40
-    mpairs_weight: float = 0.20
+    mpairs_weight: float = 0.0
     mpairs_top_k: int = 3
     mpairs_entry_z: float = 1.5
     mpairs_min_corr: float = 0.65
+    # Lag-1 cross-correlation overlay: return_i[t] predicts return_j[t+1].
+    # leadlag_lookback=0 means use all available past observations.
+    leadlag_lookback: int = 330
+    leadlag_min_obs: int = 80
+    leadlag_weight: float = 1.0
+    leadlag_top_k: int = 2
+    leadlag_entry_z: float = 0.42
+    leadlag_min_corr: float = 0.0
+    leadlag_prefix: bool = True
     # Adaptive rebalance band: widen in high vol, tighten in low vol (0 = off)
     adaptive_band_vol_lb: int = 10  # lookback for vol ratio; 0 => disabled
-    adaptive_band_scale: float = 2.0  # multiplier on band when vol ratio >= 1
+    adaptive_band_scale: float = 2.5  # multiplier on band when vol ratio >= 1
     # Asymmetric signal clipping (1.0 = symmetric/off)
     signal_clip_long: float = 1.0  # clip for positive z-scores (long signals)
     signal_clip_short: float = 1.0  # clip for negative z-scores (short signals)
     # Vol-targeted position sizing: scale dollar limit by inverse rolling vol per instrument (0 = off)
     vol_target_lookback: int = 20  # lookback for rolling vol; 0 => disabled
-    vol_target_floor: float = 0.7  # min scale
-    vol_target_cap: float = 2.0  # max scale
+    vol_target_floor: float = 2.75  # min scale
+    vol_target_cap: float = 3.0  # max scale
 
     def label(self) -> str:
         w = "eq" if self.weights is None else "/".join(f"{x:.2f}" for x in self.weights)
@@ -151,6 +160,14 @@ class Params:
             if self.mpairs_weight > 0
             else ""
         )
+        leadlag = (
+            f" leadlag={self.leadlag_lookback}@{self.leadlag_weight:.2f}"
+            f"k{self.leadlag_top_k}z{self.leadlag_entry_z:.2f}"
+            f"c{self.leadlag_min_corr:.2f}"
+            f"{'+pfx' if self.leadlag_prefix else ''}"
+            if self.leadlag_weight > 0
+            else ""
+        )
         adapt = (
             f" adapt={self.adaptive_band_vol_lb}@{self.adaptive_band_scale:.2f}"
             if self.adaptive_band_vol_lb > 0
@@ -168,7 +185,7 @@ class Params:
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
             f"{clip}{mom}{regime}{ema}{xs}{pairs}{algo_scale}{algo_hedge}"
-            f"{ols}{mpairs}{adapt}{asym}{vt}"
+            f"{ols}{mpairs}{leadlag}{adapt}{asym}{vt}"
         )
 
 
@@ -259,6 +276,68 @@ def _mpairs_signal(
     return np.clip(sig / m, -params.signal_clip_short, params.signal_clip_long) * clip_max
 
 
+def _leadlag_signal(daily_returns: np.ndarray, params: Params) -> np.ndarray:
+    """Lag-1 cross-correlation signal: leaders' latest return predicts followers."""
+    nins, nret = daily_returns.shape
+    if nret < params.leadlag_min_obs + 1:
+        return np.zeros(nins)
+
+    if params.leadlag_lookback > 0:
+        lb = min(params.leadlag_lookback, nret - 1)
+    else:
+        lb = nret - 1
+    if lb < params.leadlag_min_obs:
+        return np.zeros(nins)
+
+    if params.leadlag_prefix:
+        leader = daily_returns[:, :lb]
+        follower = daily_returns[:, 1 : lb + 1]
+    else:
+        leader = daily_returns[:, -(lb + 1) : -1]
+        follower = daily_returns[:, -lb:]
+    leader_mu = leader.mean(axis=1, keepdims=True)
+    follower_mu = follower.mean(axis=1, keepdims=True)
+    leader_sd = leader.std(axis=1, keepdims=True)
+    follower_sd = follower.std(axis=1, keepdims=True)
+    valid_leader = leader_sd[:, 0] >= VOLATILITY_FLOOR
+    valid_follower = follower_sd[:, 0] >= VOLATILITY_FLOOR
+    if not np.any(valid_leader) or not np.any(valid_follower):
+        return np.zeros(nins)
+
+    leader_z = (leader - leader_mu) / np.maximum(leader_sd, VOLATILITY_FLOOR)
+    follower_z = (follower - follower_mu) / np.maximum(follower_sd, VOLATILITY_FLOOR)
+    corr = leader_z @ follower_z.T / lb
+    corr[~valid_leader, :] = 0.0
+    corr[:, ~valid_follower] = 0.0
+    np.fill_diagonal(corr, 0.0)
+
+    latest = daily_returns[:, -1]
+    latest_z = (latest - leader_mu[:, 0]) / np.maximum(leader_sd[:, 0], VOLATILITY_FLOOR)
+    if params.leadlag_entry_z > 0:
+        latest_z = np.where(np.abs(latest_z) >= params.leadlag_entry_z, latest_z, 0.0)
+    latest_z[~valid_leader] = 0.0
+
+    weights = corr.copy()
+    abs_weights = np.abs(weights)
+    if params.leadlag_top_k > 0 and params.leadlag_top_k < nins:
+        keep = np.zeros_like(weights, dtype=bool)
+        idx = np.argpartition(abs_weights, -params.leadlag_top_k, axis=0)[
+            -params.leadlag_top_k :,
+            :,
+        ]
+        keep[idx, np.arange(nins)[None, :]] = True
+        weights[~keep] = 0.0
+    weights[abs_weights < params.leadlag_min_corr] = 0.0
+
+    denom = np.sum(np.abs(weights), axis=0)
+    sig = np.zeros(nins)
+    active = denom > VOLATILITY_FLOOR
+    if np.any(active):
+        sig[active] = latest_z @ weights[:, active] / denom[active]
+
+    return np.clip(sig, -params.signal_clip_short, params.signal_clip_long)
+
+
 # ── Parameterised strategy (a pure function of history + previous positions) ──
 def _reversal_signal(prc_so_far: np.ndarray, params: Params) -> np.ndarray:
     """Vol-standardised multi-horizon reversal (+ optional momentum) signal."""
@@ -327,6 +406,11 @@ def strategy_positions(
         longest = max(longest, params.ols_lookback)
     if params.mpairs_weight > 0:
         longest = max(longest, params.mpairs_lookback)
+    if params.leadlag_weight > 0:
+        lag_need = params.leadlag_min_obs + 1
+        if params.leadlag_lookback > 0:
+            lag_need = max(lag_need, params.leadlag_lookback + 1)
+        longest = max(longest, lag_need)
     if params.adaptive_band_vol_lb > 0:
         longest = max(longest, params.adaptive_band_vol_lb)
     min_days = longest + 1 if params.signal_ema_alpha < 1.0 else longest
@@ -334,8 +418,9 @@ def strategy_positions(
     if nt <= min_days:
         return np.zeros(nins, dtype=int)
 
-    signal = _reversal_signal(prc_so_far, params)
-    if params.signal_ema_alpha < 1.0:
+    leadlag_replaces = params.leadlag_weight >= 1.0
+    signal = np.zeros(nins) if leadlag_replaces else _reversal_signal(prc_so_far, params)
+    if not leadlag_replaces and params.signal_ema_alpha < 1.0:
         prev_signal = _reversal_signal(prc_so_far[:, :-1], params)
         alpha = params.signal_ema_alpha
         signal = alpha * signal + (1.0 - alpha) * prev_signal
@@ -343,7 +428,7 @@ def strategy_positions(
     need = max(params.lookbacks)
     if params.regime_scale != 1.0:
         need = max(need, params.regime_vol_long)
-    if params.xs_weight > 0:
+    if not leadlag_replaces and params.xs_weight > 0:
         need = max(need, params.xs_lookback)
     if params.pairs_weight > 0:
         need = max(need, params.pairs_lookback)
@@ -351,6 +436,13 @@ def strategy_positions(
         need = max(need, params.ols_lookback)
     if params.mpairs_weight > 0:
         need = max(need, params.mpairs_lookback)
+    if params.leadlag_weight > 0:
+        lag_need = params.leadlag_min_obs + 1
+        if params.leadlag_lookback > 0:
+            lag_need = max(lag_need, params.leadlag_lookback + 1)
+        need = max(need, lag_need)
+        if params.leadlag_prefix:
+            need = max(need, nt - 1)
     if params.adaptive_band_vol_lb > 0:
         need = max(need, params.adaptive_band_vol_lb)
     if params.vol_target_lookback > 0:
@@ -375,7 +467,7 @@ def strategy_positions(
             xs_signal = np.clip(xs_signal / sd, -params.signal_clip_short, params.signal_clip_long)
             signal = (1.0 - params.xs_weight) * signal + params.xs_weight * xs_signal
 
-    if params.pairs_weight > 0 and nt > params.pairs_lookback:
+    if not leadlag_replaces and params.pairs_weight > 0 and nt > params.pairs_lookback:
         lb = params.pairs_lookback
         # Equal-weight basket of instruments 1..n (ex-ALGO)
         basket = np.nanmean(log_prices[1:, :], axis=0)
@@ -390,7 +482,7 @@ def strategy_positions(
             pair_sig[1:] = -pair_sig[0] / (nins - 1)
             signal = (1.0 - params.pairs_weight) * signal + params.pairs_weight * pair_sig
 
-    if params.ols_weight > 0 and nt > params.ols_lookback:
+    if not leadlag_replaces and params.ols_weight > 0 and nt > params.ols_lookback:
         lb = params.ols_lookback
         basket = np.nanmean(log_prices[1:, :], axis=0)
         algo = log_prices[0, :]
@@ -403,10 +495,15 @@ def strategy_positions(
             ols_sig[1:] = -ols_sig[0] / (nins - 1)
             signal = (1.0 - params.ols_weight) * signal + params.ols_weight * ols_sig
 
-    if params.mpairs_weight > 0 and nt > params.mpairs_lookback:
+    if not leadlag_replaces and params.mpairs_weight > 0 and nt > params.mpairs_lookback:
         mp = _mpairs_signal(log_prices, daily_returns, params)
         if np.any(np.abs(mp) > VOLATILITY_FLOOR):
             signal = (1.0 - params.mpairs_weight) * signal + params.mpairs_weight * mp
+
+    if params.leadlag_weight > 0:
+        ll = _leadlag_signal(daily_returns, params)
+        if np.any(np.abs(ll) > VOLATILITY_FLOOR):
+            signal = (1.0 - params.leadlag_weight) * signal + params.leadlag_weight * ll
 
     if params.algo_signal_scale != 1.0:
         signal = signal.copy()
@@ -616,15 +713,21 @@ def evaluate(prc_all: np.ndarray, params: Params) -> Evaluation:
 def build_grid() -> list[Params]:
     base = Params()
     grid = [base]
-    # Vol-targeted position sizing: lookback ∈ {20, 60}, floor ∈ {0.5, 0.7}, cap ∈ {1.5, 2.0}
-    for vt_lb in [20, 60]:
-        for vt_floor in [0.5, 0.7]:
-            for vt_cap in [1.5, 2.0]:
-                grid.append(Params(
-                    vol_target_lookback=vt_lb,
-                    vol_target_floor=vt_floor,
-                    vol_target_cap=vt_cap,
-                ))
+    # Lag-1 cross-correlation: leaders' latest return predicts follower returns.
+    for lb in [0, 120]:
+        for top_k in [1, 3, 5]:
+            for min_corr in [0.03, 0.06]:
+                for entry_z in [0.0, 0.5]:
+                    for weight in [0.50, 0.75, 1.0]:
+                        grid.append(
+                            Params(
+                                leadlag_lookback=lb,
+                                leadlag_top_k=top_k,
+                                leadlag_min_corr=min_corr,
+                                leadlag_entry_z=entry_z,
+                                leadlag_weight=weight,
+                            )
+                        )
     return grid
 
 
