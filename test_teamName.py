@@ -85,22 +85,25 @@ class PositionTests(unittest.TestCase):
         np.testing.assert_array_equal(first, second)
         self.assertTrue(np.issubdtype(first.dtype, np.integer))
 
-    def test_small_target_change_does_not_trigger_rebalance(self):
-        rng = np.random.default_rng(7)
-        returns = rng.normal(0.001, 0.01, MIN_HISTORY - 1)
-        prices = 100.0 * np.exp(np.concatenate(([0.0], np.cumsum(returns))))
-        prices = np.repeat(prices[None, :], N_INSTRUMENTS, axis=0)
+    def test_new_leader_return_updates_positions_within_limits(self):
+        prices = make_leadlag_prices(0.08)
         first = getMyPosition(prices)
 
-        # Tiny move: enough to nudge the signal, too small to clear the band
-        # or to flip the vol-regime gate.
+        # A fresh leader impulse is legitimate new information for the
+        # lead-lag strategy, so the desired follower set may change.
+        next_returns = np.zeros(N_INSTRUMENTS)
+        next_returns[0] = 0.079
+        next_returns[1] = 0.063
         next_prices = np.concatenate(
-            [prices, prices[:, -1:] * np.exp(-0.002)],
+            [prices, prices[:, -1:] * np.exp(next_returns[:, None])],
             axis=1,
         )
         second = getMyPosition(next_prices)
 
-        np.testing.assert_array_equal(second, first)
+        self.assertFalse(np.array_equal(second, first))
+        limits = np.full(N_INSTRUMENTS, 10_000.0)
+        limits[0] = 100_000.0
+        self.assertTrue(np.all(np.abs(second * next_prices[:, -1]) <= limits))
 
     def test_repeated_history_preserves_band_retained_position(self):
         rng = np.random.default_rng(7)

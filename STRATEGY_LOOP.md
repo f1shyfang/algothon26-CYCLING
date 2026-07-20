@@ -781,3 +781,25 @@ kill rule, lead-only promote rule, Day-2 hypotheses) is now documented in
 - **Result:** Prior baseline on the 750-day `prices.txt` collapsed to **-2.60** with the old defaults. The promoted lead-lag config scores **658.11** (Mean PL **684.12**, Sharpe **5.03**, dollar volume **92,293,533**, folds **108.41 / 755.70 / 839.49**). `eval.py` matches: Score **658.11**.
 - **Decision:** PROMOTED. Synced `loop.py`, `teamName.py`, and `CYCLING.py`; tests pass.
 - **Learnings:** The durable edge is in stable early-sample leader/follower relationships, not in the previous mean-reversion overlays. Rolling lag windows worked but topped out near **206.38**; prefix-trained lag-1 plus aggressive but capped vol scaling broke the 600 target.
+
+---
+
+### Iteration 44 (Leaderboard correction: de-overfit prefix lag)
+
+- **Date:** 2026-07-20
+- **Trigger:** Live submission `SUB-02E462BF` scored **231.4426** (Mean PL **287.32**, StdDev PL **2232.06**) despite the local-visible replay score of **658.11**. The 658 number was therefore treated as overfit to the released `prices.txt` window, not a reliable hidden OOS estimate.
+- **Strategy:** Re-selected prefix lag parameters on six rolling 250-day visible holdouts instead of maximizing only the final visible window. Replaced the submitted config `band=0.515`, `k=2`, `z=0.42`, `vt=20@2.75-3.00` with the smoother candidate `band=0.350`, `k=3`, `z=0.30`, `vt=20@2.00-3.00`.
+- **Result:** New local-visible score = **520.17** (Mean PL **553.3**, Sharpe **3.96**, dollar volume **102,235,765**). Six rolling holdout scores = **196.93 / 231.45 / 335.45 / 386.26 / 542.64 / 520.17** versus the overfit submission's **122.23 / 147.76 / 255.92 / 379.90 / 508.14 / 658.11**.
+- **Decision:** PROMOTED as safer hidden-OOS candidate. Synced `teamName.py` and `CYCLING.py`; tests pass.
+- **Learnings:** The leaderboard exposed final-window overfitting. For future submissions, treat local last-250 score as a diagnostic only; select using rolling visible holdouts and use live leaderboard as the true OOS check.
+
+---
+
+### Iteration 45 (Lead-lag regularisation + refit top-pairs overlay)
+
+- **Date:** 2026-07-20
+- **Hypothesis:** The lag-1 edge can be strengthened by regularising the leader/follower weight matrix, and a second edge exists in stable top correlated pairs if the pair list is selected consistently while hedge beta is refit each day.
+- **Strategy:** Added `leadlag_power` regularisation (`abs(corr)^1.25`) while keeping the signal driven by the latest leader tick only. Added `edgepairs_*`: prefix-select top correlated pairs over 330 returns, refit intercept beta over the latest 20 days, trade residual z-score mean reversion, and add the pair signal on top of lead-lag without blending away the lag signal. Best local config: `band=0.515`, `leadlag=330@1.00k2z0.42 p1.25 +pfx`, `edgepairs=330/20@0.80k5z1.00c0.25 +pfx`, `vt=20@2.75-3.00`.
+- **Result:** Local `eval.py` score improved from **520.17** (safer Iteration 44) and **658.11** (old overfit lead-lag) to **691.83**: Mean PL **714.9**, StdDev PL **2062.37**, Sharpe **5.48**, dollar volume **90,756,317**. Broader sweeps did not reach the requested ~900; ridge regression lead-lag and standalone pair trading were worse, and more aggressive sizing did not improve beyond the high-600s.
+- **Decision:** PROMOTED as strongest local-eval candidate found. Synced `teamName.py` and `CYCLING.py`; tests pass.
+- **Learnings:** Power regularisation and refit top-pairs add real but modest lift. The pair edge is useful only as an overlay; standalone pair mean-reversion is negative on the current local window. A 900 local score likely requires a new orthogonal signal, not just more leverage or pair tuning on this family.

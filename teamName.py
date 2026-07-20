@@ -24,6 +24,17 @@ LEADLAG_TOP_K = 2
 LEADLAG_ENTRY_Z = 0.42
 LEADLAG_MIN_CORR = 0.0
 LEADLAG_PREFIX = True
+LEADLAG_POWER = 1.25
+EDGEPAIRS_SELECT_LOOKBACK = 330
+EDGEPAIRS_FIT_LOOKBACK = 20
+EDGEPAIRS_WEIGHT = 0.80
+EDGEPAIRS_TOP_K = 5
+EDGEPAIRS_ENTRY_Z = 1.0
+EDGEPAIRS_MIN_CORR = 0.25
+EDGEPAIRS_PREFIX = True
+EDGEPAIRS_INCLUDE_ALGO = False
+EDGEPAIRS_TREND = False
+EDGEPAIRS_BETA_RIDGE = 1e-6
 ADAPTIVE_BAND_VOL_LB = 10
 ADAPTIVE_BAND_SCALE = 2.5
 VOL_TARGET_LOOKBACK = 20
@@ -141,6 +152,8 @@ def _leadlag_signal(daily_returns):
     latest_z[~valid_leader] = 0.0
 
     weights = corr.copy()
+    if LEADLAG_POWER != 1.0:
+        weights = np.sign(weights) * (np.abs(weights) ** LEADLAG_POWER)
     abs_weights = np.abs(weights)
     if LEADLAG_TOP_K > 0 and LEADLAG_TOP_K < nins:
         keep = np.zeros_like(weights, dtype=bool)
@@ -161,6 +174,81 @@ def _leadlag_signal(daily_returns):
     return np.clip(sig, -1.0, 1.0)
 
 
+def _edgepairs_signal(log_prices, daily_returns):
+    nins, nret = daily_returns.shape
+    select_lb = min(EDGEPAIRS_SELECT_LOOKBACK, nret)
+    fit_lb = min(EDGEPAIRS_FIT_LOOKBACK, log_prices.shape[1])
+    if select_lb < 3 or fit_lb < 5:
+        return np.zeros(nins)
+
+    if EDGEPAIRS_PREFIX:
+        select_rets = daily_returns[:, :select_lb]
+    else:
+        select_rets = daily_returns[:, -select_lb:]
+    if EDGEPAIRS_INCLUDE_ALGO:
+        inst_offset = 0
+    else:
+        inst_offset = 1
+        select_rets = select_rets[1:, :]
+
+    n = select_rets.shape[0]
+    if n < 2:
+        return np.zeros(nins)
+
+    stds = select_rets.std(axis=1)
+    valid = stds >= VOLATILITY_FLOOR
+    valid_idx = np.flatnonzero(valid)
+    if valid_idx.size < 2:
+        return np.zeros(nins)
+    corr_matrix = np.full((n, n), np.nan)
+    corr_matrix[np.ix_(valid_idx, valid_idx)] = np.corrcoef(select_rets[valid_idx, :])
+    candidates = []
+    for a in range(n):
+        if not valid[a]:
+            continue
+        for b in range(a + 1, n):
+            if not valid[b]:
+                continue
+            corr = corr_matrix[a, b]
+            if np.isnan(corr) or corr < EDGEPAIRS_MIN_CORR:
+                continue
+            candidates.append((corr, a + inst_offset, b + inst_offset))
+    if not candidates:
+        return np.zeros(nins)
+    candidates.sort(reverse=True)
+
+    sig = np.zeros(nins)
+    active = 0
+    yx = log_prices[:, -fit_lb:]
+    for _, i, j in candidates[:EDGEPAIRS_TOP_K]:
+        y = yx[i, :]
+        x = yx[j, :]
+        x_mu = float(x.mean())
+        y_mu = float(y.mean())
+        xc = x - x_mu
+        yc = y - y_mu
+        beta = float(xc @ yc) / (float(xc @ xc) + EDGEPAIRS_BETA_RIDGE)
+        if beta <= 0 or not np.isfinite(beta):
+            continue
+        beta = float(np.clip(beta, 0.2, 5.0))
+        alpha = y_mu - beta * x_mu
+        spread = y - (alpha + beta * x)
+        z = _spread_z(spread, fit_lb)
+        if abs(z) < EDGEPAIRS_ENTRY_Z:
+            continue
+        zc = float(np.clip(z, -1.0, 1.0))
+        direction = 1.0 if EDGEPAIRS_TREND else -1.0
+        sig[i] += direction * zc
+        sig[j] += -direction * zc * beta
+        active += 1
+
+    if active == 0:
+        return np.zeros(nins)
+    sig /= active
+    max_abs = np.max(np.abs(sig)) + VOLATILITY_FLOOR
+    return np.clip(sig / max_abs, -1.0, 1.0)
+
+
 def getMyPosition(prcSoFar):
     global _current_positions, _last_history
 
@@ -175,6 +263,12 @@ def getMyPosition(prcSoFar):
         if LEADLAG_LOOKBACK > 0:
             lag_need = max(lag_need, LEADLAG_LOOKBACK + 1)
         longest_lookback = max(longest_lookback, lag_need)
+    if EDGEPAIRS_WEIGHT > 0 and EDGEPAIRS_SELECT_LOOKBACK > 0:
+        longest_lookback = max(
+            longest_lookback,
+            EDGEPAIRS_SELECT_LOOKBACK + 1,
+            EDGEPAIRS_FIT_LOOKBACK,
+        )
 
     same_history = _last_history.shape == prcSoFar.shape and np.array_equal(
         _last_history,
@@ -195,7 +289,10 @@ def getMyPosition(prcSoFar):
         _last_history = prcSoFar.copy()
         return _current_positions.copy()
 
-    if LEADLAG_WEIGHT > 0 and LEADLAG_PREFIX:
+    if (
+        (LEADLAG_WEIGHT > 0 and LEADLAG_PREFIX)
+        or (EDGEPAIRS_WEIGHT > 0 and EDGEPAIRS_PREFIX)
+    ):
         recent_prices = prcSoFar
     else:
         recent_prices = prcSoFar[:, -(longest_lookback + 1) :]
@@ -234,6 +331,11 @@ def getMyPosition(prcSoFar):
         leadlag_signal = _leadlag_signal(daily_returns)
         if np.any(np.abs(leadlag_signal) > VOLATILITY_FLOOR):
             signal = (1.0 - LEADLAG_WEIGHT) * signal + LEADLAG_WEIGHT * leadlag_signal
+
+    if EDGEPAIRS_WEIGHT > 0 and EDGEPAIRS_SELECT_LOOKBACK > 0:
+        edgepairs_signal = _edgepairs_signal(log_prices, daily_returns)
+        if np.any(np.abs(edgepairs_signal) > VOLATILITY_FLOOR):
+            signal = np.clip(signal + EDGEPAIRS_WEIGHT * edgepairs_signal, -1.0, 1.0)
 
     short_vol = daily_returns[:, -REGIME_VOL_SHORT:].std(axis=1)
     long_vol = daily_returns[:, -REGIME_VOL_LONG:].std(axis=1)

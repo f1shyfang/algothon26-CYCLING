@@ -94,6 +94,20 @@ class Params:
     leadlag_entry_z: float = 0.42
     leadlag_min_corr: float = 0.0
     leadlag_prefix: bool = True
+    leadlag_ridge: float = 0.0
+    leadlag_shrink: float = 0.0
+    leadlag_power: float = 1.25
+    # Refit top-pairs edge: select stable correlated pairs, refit beta each day.
+    edgepairs_select_lookback: int = 330  # 0 => disabled
+    edgepairs_fit_lookback: int = 20
+    edgepairs_weight: float = 0.80
+    edgepairs_top_k: int = 5
+    edgepairs_entry_z: float = 1.0
+    edgepairs_min_corr: float = 0.25
+    edgepairs_prefix: bool = True
+    edgepairs_include_algo: bool = False
+    edgepairs_trend: bool = False
+    edgepairs_beta_ridge: float = 1e-6
     # Adaptive rebalance band: widen in high vol, tighten in low vol (0 = off)
     adaptive_band_vol_lb: int = 10  # lookback for vol ratio; 0 => disabled
     adaptive_band_scale: float = 2.5  # multiplier on band when vol ratio >= 1
@@ -164,8 +178,21 @@ class Params:
             f" leadlag={self.leadlag_lookback}@{self.leadlag_weight:.2f}"
             f"k{self.leadlag_top_k}z{self.leadlag_entry_z:.2f}"
             f"c{self.leadlag_min_corr:.2f}"
+            f"r{self.leadlag_ridge:.2f}"
+            f"s{self.leadlag_shrink:.2f}"
+            f"p{self.leadlag_power:.2f}"
             f"{'+pfx' if self.leadlag_prefix else ''}"
             if self.leadlag_weight > 0
+            else ""
+        )
+        edgepairs = (
+            f" edgepairs={self.edgepairs_select_lookback}/{self.edgepairs_fit_lookback}"
+            f"@{self.edgepairs_weight:.2f}k{self.edgepairs_top_k}"
+            f"z{self.edgepairs_entry_z:.2f}c{self.edgepairs_min_corr:.2f}"
+            f"{'+pfx' if self.edgepairs_prefix else ''}"
+            f"{'+algo' if self.edgepairs_include_algo else ''}"
+            f"{'+trend' if self.edgepairs_trend else ''}"
+            if self.edgepairs_weight > 0 and self.edgepairs_select_lookback > 0
             else ""
         )
         adapt = (
@@ -185,7 +212,7 @@ class Params:
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
             f"{clip}{mom}{regime}{ema}{xs}{pairs}{algo_scale}{algo_hedge}"
-            f"{ols}{mpairs}{leadlag}{adapt}{asym}{vt}"
+            f"{ols}{mpairs}{leadlag}{edgepairs}{adapt}{asym}{vt}"
         )
 
 
@@ -307,6 +334,13 @@ def _leadlag_signal(daily_returns: np.ndarray, params: Params) -> np.ndarray:
     leader_z = (leader - leader_mu) / np.maximum(leader_sd, VOLATILITY_FLOOR)
     follower_z = (follower - follower_mu) / np.maximum(follower_sd, VOLATILITY_FLOOR)
     corr = leader_z @ follower_z.T / lb
+    if params.leadlag_ridge > 0:
+        gram = leader_z @ leader_z.T / lb
+        gram += params.leadlag_ridge * np.eye(nins)
+        try:
+            corr = np.linalg.solve(gram, corr)
+        except np.linalg.LinAlgError:
+            corr = np.linalg.pinv(gram) @ corr
     corr[~valid_leader, :] = 0.0
     corr[:, ~valid_follower] = 0.0
     np.fill_diagonal(corr, 0.0)
@@ -318,6 +352,10 @@ def _leadlag_signal(daily_returns: np.ndarray, params: Params) -> np.ndarray:
     latest_z[~valid_leader] = 0.0
 
     weights = corr.copy()
+    if params.leadlag_shrink > 0:
+        weights = np.sign(weights) * np.maximum(np.abs(weights) - params.leadlag_shrink, 0.0)
+    if params.leadlag_power != 1.0:
+        weights = np.sign(weights) * (np.abs(weights) ** params.leadlag_power)
     abs_weights = np.abs(weights)
     if params.leadlag_top_k > 0 and params.leadlag_top_k < nins:
         keep = np.zeros_like(weights, dtype=bool)
@@ -339,6 +377,86 @@ def _leadlag_signal(daily_returns: np.ndarray, params: Params) -> np.ndarray:
 
 
 # ── Parameterised strategy (a pure function of history + previous positions) ──
+def _edgepairs_signal(
+    log_prices: np.ndarray,
+    daily_returns: np.ndarray,
+    params: Params,
+) -> np.ndarray:
+    """Refit selected high-correlation pairs and trade residual mean reversion."""
+    nins, nret = daily_returns.shape
+    select_lb = min(params.edgepairs_select_lookback, nret)
+    fit_lb = min(params.edgepairs_fit_lookback, log_prices.shape[1])
+    if select_lb < 3 or fit_lb < 5:
+        return np.zeros(nins)
+
+    if params.edgepairs_prefix:
+        select_rets = daily_returns[:, :select_lb]
+    else:
+        select_rets = daily_returns[:, -select_lb:]
+    if params.edgepairs_include_algo:
+        inst_offset = 0
+    else:
+        inst_offset = 1
+        select_rets = select_rets[1:, :]
+
+    n = select_rets.shape[0]
+    if n < 2:
+        return np.zeros(nins)
+
+    stds = select_rets.std(axis=1)
+    valid = stds >= VOLATILITY_FLOOR
+    valid_idx = np.flatnonzero(valid)
+    if valid_idx.size < 2:
+        return np.zeros(nins)
+    corr_matrix = np.full((n, n), np.nan)
+    corr_matrix[np.ix_(valid_idx, valid_idx)] = np.corrcoef(select_rets[valid_idx, :])
+    candidates: list[tuple[float, int, int]] = []
+    for a in range(n):
+        if not valid[a]:
+            continue
+        for b in range(a + 1, n):
+            if not valid[b]:
+                continue
+            corr = float(corr_matrix[a, b])
+            if np.isnan(corr) or corr < params.edgepairs_min_corr:
+                continue
+            candidates.append((corr, a + inst_offset, b + inst_offset))
+    if not candidates:
+        return np.zeros(nins)
+    candidates.sort(reverse=True)
+
+    sig = np.zeros(nins)
+    active = 0
+    yx = log_prices[:, -fit_lb:]
+    for _, i, j in candidates[: params.edgepairs_top_k]:
+        y = yx[i, :]
+        x = yx[j, :]
+        x_mu = float(x.mean())
+        y_mu = float(y.mean())
+        xc = x - x_mu
+        yc = y - y_mu
+        beta = float(xc @ yc) / (float(xc @ xc) + params.edgepairs_beta_ridge)
+        if beta <= 0 or not np.isfinite(beta):
+            continue
+        beta = float(np.clip(beta, 0.2, 5.0))
+        alpha = y_mu - beta * x_mu
+        spread = y - (alpha + beta * x)
+        z = spread_z(spread, fit_lb)
+        if abs(z) < params.edgepairs_entry_z:
+            continue
+        zc = float(np.clip(z, -params.signal_clip_short, params.signal_clip_long))
+        direction = 1.0 if params.edgepairs_trend else -1.0
+        sig[i] += direction * zc
+        sig[j] += -direction * zc * beta
+        active += 1
+
+    if active == 0:
+        return np.zeros(nins)
+    sig /= active
+    m = np.max(np.abs(sig)) + VOLATILITY_FLOOR
+    return np.clip(sig / m, -params.signal_clip_short, params.signal_clip_long)
+
+
 def _reversal_signal(prc_so_far: np.ndarray, params: Params) -> np.ndarray:
     """Vol-standardised multi-horizon reversal (+ optional momentum) signal."""
     nins, nt = prc_so_far.shape
@@ -411,6 +529,12 @@ def strategy_positions(
         if params.leadlag_lookback > 0:
             lag_need = max(lag_need, params.leadlag_lookback + 1)
         longest = max(longest, lag_need)
+    if params.edgepairs_weight > 0 and params.edgepairs_select_lookback > 0:
+        longest = max(
+            longest,
+            params.edgepairs_select_lookback + 1,
+            params.edgepairs_fit_lookback,
+        )
     if params.adaptive_band_vol_lb > 0:
         longest = max(longest, params.adaptive_band_vol_lb)
     min_days = longest + 1 if params.signal_ema_alpha < 1.0 else longest
@@ -442,6 +566,14 @@ def strategy_positions(
             lag_need = max(lag_need, params.leadlag_lookback + 1)
         need = max(need, lag_need)
         if params.leadlag_prefix:
+            need = max(need, nt - 1)
+    if params.edgepairs_weight > 0 and params.edgepairs_select_lookback > 0:
+        need = max(
+            need,
+            params.edgepairs_select_lookback + 1,
+            params.edgepairs_fit_lookback,
+        )
+        if params.edgepairs_prefix:
             need = max(need, nt - 1)
     if params.adaptive_band_vol_lb > 0:
         need = max(need, params.adaptive_band_vol_lb)
@@ -504,6 +636,15 @@ def strategy_positions(
         ll = _leadlag_signal(daily_returns, params)
         if np.any(np.abs(ll) > VOLATILITY_FLOOR):
             signal = (1.0 - params.leadlag_weight) * signal + params.leadlag_weight * ll
+
+    if params.edgepairs_weight > 0 and params.edgepairs_select_lookback > 0:
+        ep = _edgepairs_signal(log_prices, daily_returns, params)
+        if np.any(np.abs(ep) > VOLATILITY_FLOOR):
+            signal = np.clip(
+                signal + params.edgepairs_weight * ep,
+                -params.signal_clip_short,
+                params.signal_clip_long,
+            )
 
     if params.algo_signal_scale != 1.0:
         signal = signal.copy()
