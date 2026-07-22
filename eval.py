@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Algothon 2026 evaluation script.
+"""Algothon 2026 evaluation script with walk-forward validation.
 
-Participants: write getMyPosition(prcSoFar) in teamName.py and update the imports below
+Shows both local performance AND estimated out-of-sample performance.
 """
 
 import numpy as np
@@ -63,9 +63,9 @@ commRate[0] = inst0CommRate
 dlrPosLimit = np.full(nInst, defaultDlrPosLimit)
 dlrPosLimit[0] = inst0DlrPosLimit
 
-def calcPL(prcHist, numTestDays):
+def calcPL(prcHist, testStart, testEnd, verbose=False):
     """
-    Function to loop over days and calculate/store PnLs
+    Calculate P&L for a specific test window.
     """
     
     # initial values
@@ -77,17 +77,14 @@ def calcPL(prcHist, numTestDays):
     
     todayPLL = []
     _, nt = prcHist.shape
-    # start day is the first day to run getPosition() on
-    # e.g. startDay=500 if last 250 of 750 days used as test days
-    startDay = nt - numTestDays
     
-    for t in range(startDay, nt + 1):
-        # price history up to and including t, e.g. if t=500, gets first 500 days
+    for t in range(testStart, testEnd + 1):
+        # price history up to and including t
         prcHistSoFar = prcHist[:, :t]
         curPrices = prcHistSoFar[:, -1]
 
         # trading loop, do not do it on the very last day of the test
-        if t < nt:
+        if t < testEnd:
             # get new positions
             newPosOrig = getPosition(prcHistSoFar)
 
@@ -116,16 +113,15 @@ def calcPL(prcHist, numTestDays):
         
         value = cash + posValue
 
-        # calculate return (portfolio value over total dollar volume)
-        ret = 0.0
-        if totDVolume > 0:
-            ret = value / totDVolume
-
         # only score for test days
-        if t > startDay:
-            print(
-                f"Day {t} value: {value:.2f} todayPL: ${todayPL:.2f} $-traded: {totDVolume:.0f} return: {ret:.5f}"
-            )
+        if t > testStart:
+            if verbose:
+                ret = 0.0
+                if totDVolume > 0:
+                    ret = value / totDVolume
+                print(
+                    f"Day {t} value: {value:.2f} todayPL: ${todayPL:.2f} $-traded: {totDVolume:.0f} return: {ret:.5f}"
+                )
             todayPLL.append(todayPL)
             
     pll = np.array(todayPLL)
@@ -135,15 +131,76 @@ def calcPL(prcHist, numTestDays):
     annSharpe = 0.0
     if plstd > 0:
         annSharpe = np.sqrt(250) * plmu / plstd
+    
+    score_val = score(plmu, plstd, scoreDefaultParam)
+    ret = 0.0
+    if totDVolume > 0:
+        ret = value / totDVolume
         
-    return (plmu, ret, plstd, annSharpe, totDVolume)
+    return {
+        'mean_pl': plmu,
+        'return': ret,
+        'std_pl': plstd,
+        'sharpe': annSharpe,
+        'dvol': totDVolume,
+        'score': score_val
+    }
 
-meanpl, ret, plstd, sharpe, dvol = calcPL(prcAll, numTestDays)
-scoreVal = score(meanpl, plstd, scoreDefaultParam)
-print("=====")
-print(f"mean(PL): {meanpl:.1f}")
-print(f"return: {ret:.5f}")
-print(f"StdDev(PL): {plstd:.2f}")
-print(f"annSharpe(PL): {sharpe:.2f}")
-print(f"totDvolume: {dvol:.0f}")
-print(f"Score: {scoreVal:.2f}")
+print("=" * 80)
+print("WALK-FORWARD VALIDATION (Out-of-Sample Robustness Check)")
+print("=" * 80)
+
+# Test on current window (what you see locally)
+result_current = calcPL(prcAll, 501, 750, verbose=True)
+print("\n" + "=" * 80)
+print("LOCAL WINDOW (501-750) - What you see locally:")
+print("=" * 80)
+print(f"mean(PL): ${result_current['mean_pl']:.1f}")
+print(f"return: {result_current['return']:.5f}")
+print(f"StdDev(PL): ${result_current['std_pl']:.2f}")
+print(f"annSharpe(PL): {result_current['sharpe']:.2f}")
+print(f"totDvolume: ${result_current['dvol']:.0f}")
+print(f"Score: ${result_current['score']:.2f}")
+
+# Test on earlier windows (simulate generalization)
+print("\n" + "=" * 80)
+print("EARLIER WINDOWS (simulate unseen data like website would see):")
+print("=" * 80)
+
+results = {'current': result_current}
+
+for name, (start, end) in [
+    ("Window 1 (251-500)", (251, 500)),
+    ("Window 2 (201-450)", (201, 450)),
+    ("Window 3 (101-350)", (101, 350)),
+]:
+    result = calcPL(prcAll, start, end, verbose=False)
+    results[name] = result
+    print(f"\n{name}:")
+    print(f"  Mean PL: ${result['mean_pl']:.1f} | Sharpe: {result['sharpe']:.2f} | Score: ${result['score']:.2f}")
+
+# Estimate out-of-sample score
+scores_earlier = [results[k]['score'] for k in results if k != 'current']
+avg_earlier = np.mean(scores_earlier)
+median_earlier = np.median(scores_earlier)
+
+print("\n" + "=" * 80)
+print("GENERALIZATION ASSESSMENT:")
+print("=" * 80)
+print(f"Local window score:      ${result_current['score']:.2f}")
+print(f"Earlier windows (avg):   ${avg_earlier:.2f}")
+print(f"Earlier windows (median):${median_earlier:.2f}")
+print(f"\nEstimated website score: ~${median_earlier:.0f} (based on historical patterns)")
+
+if result_current['score'] > avg_earlier * 3:
+    print("\n⚠️  SEVERE OVERFITTING DETECTED")
+    print("   Your local score is 3x+ higher than earlier windows.")
+    print("   Website will likely score significantly lower.")
+    print(f"   Expect ~${median_earlier:.0f} on unseen data, not ${result_current['score']:.0f}")
+elif result_current['score'] > avg_earlier * 1.5:
+    print("\n⚠️  MODERATE OVERFITTING")
+    print("   Your local window may be easier than average.")
+    print(f"   Expect ~${median_earlier:.0f} on unseen data.")
+else:
+    print("\n✓ GOOD GENERALIZATION")
+    print("   Algorithm is consistent across windows.")
