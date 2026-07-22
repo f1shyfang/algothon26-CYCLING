@@ -333,9 +333,9 @@ def _leadlag_signal(daily_returns: np.ndarray, params: Params) -> np.ndarray:
 
     leader_z = (leader - leader_mu) / np.maximum(leader_sd, VOLATILITY_FLOOR)
     follower_z = (follower - follower_mu) / np.maximum(follower_sd, VOLATILITY_FLOOR)
-    corr = leader_z @ follower_z.T / lb
+    corr = np.dot(leader_z, follower_z.T) / lb
     if params.leadlag_ridge > 0:
-        gram = leader_z @ leader_z.T / lb
+        gram = np.dot(leader_z, leader_z.T) / lb
         gram += params.leadlag_ridge * np.eye(nins)
         try:
             corr = np.linalg.solve(gram, corr)
@@ -371,7 +371,7 @@ def _leadlag_signal(daily_returns: np.ndarray, params: Params) -> np.ndarray:
     sig = np.zeros(nins)
     active = denom > VOLATILITY_FLOOR
     if np.any(active):
-        sig[active] = latest_z @ weights[:, active] / denom[active]
+        sig[active] = np.dot(latest_z, weights[:, active]) / denom[active]
 
     return np.clip(sig, -params.signal_clip_short, params.signal_clip_long)
 

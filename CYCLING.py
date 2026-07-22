@@ -140,7 +140,7 @@ def _leadlag_signal(daily_returns):
 
     leader_z = (leader - leader_mu) / np.maximum(leader_sd, VOLATILITY_FLOOR)
     follower_z = (follower - follower_mu) / np.maximum(follower_sd, VOLATILITY_FLOOR)
-    corr = leader_z @ follower_z.T / lb
+    corr = np.dot(leader_z, follower_z.T) / lb
     corr[~valid_leader, :] = 0.0
     corr[:, ~valid_follower] = 0.0
     np.fill_diagonal(corr, 0.0)
@@ -169,7 +169,7 @@ def _leadlag_signal(daily_returns):
     sig = np.zeros(nins)
     active = denom > VOLATILITY_FLOOR
     if np.any(active):
-        sig[active] = latest_z @ weights[:, active] / denom[active]
+        sig[active] = np.dot(latest_z, weights[:, active]) / denom[active]
 
     return np.clip(sig, -1.0, 1.0)
 
