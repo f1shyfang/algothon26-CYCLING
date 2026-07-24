@@ -95,12 +95,13 @@ class Params:
     leadlag_min_corr: float = 0.0
     leadlag_prefix: bool = True
     leadlag_ridge: float = 0.0
-    leadlag_shrink: float = 0.0
+    leadlag_shrink: float = 0.0092
     leadlag_power: float = 1.25
+    leadlag_stable_halves: bool = False
     # Refit top-pairs edge: select stable correlated pairs, refit beta each day.
     edgepairs_select_lookback: int = 330  # 0 => disabled
-    edgepairs_fit_lookback: int = 20
-    edgepairs_weight: float = 0.80
+    edgepairs_fit_lookback: int = 30
+    edgepairs_weight: float = 1.0
     edgepairs_top_k: int = 5
     edgepairs_entry_z: float = 1.0
     edgepairs_min_corr: float = 0.25
@@ -108,6 +109,12 @@ class Params:
     edgepairs_include_algo: bool = False
     edgepairs_trend: bool = False
     edgepairs_beta_ridge: float = 1e-6
+    # Factor/ETF-style residual edge: instrument vs rolling synthetic basket.
+    factor_lookback: int = 20  # 0 => disabled
+    factor_weight: float = 0.08
+    factor_entry_z: float = 1.30
+    factor_include_algo: bool = False
+    factor_beta_ridge: float = 1e-6
     # Adaptive rebalance band: widen in high vol, tighten in low vol (0 = off)
     adaptive_band_vol_lb: int = 10  # lookback for vol ratio; 0 => disabled
     adaptive_band_scale: float = 2.5  # multiplier on band when vol ratio >= 1
@@ -181,6 +188,7 @@ class Params:
             f"r{self.leadlag_ridge:.2f}"
             f"s{self.leadlag_shrink:.2f}"
             f"p{self.leadlag_power:.2f}"
+            f"{'+stable' if self.leadlag_stable_halves else ''}"
             f"{'+pfx' if self.leadlag_prefix else ''}"
             if self.leadlag_weight > 0
             else ""
@@ -193,6 +201,13 @@ class Params:
             f"{'+algo' if self.edgepairs_include_algo else ''}"
             f"{'+trend' if self.edgepairs_trend else ''}"
             if self.edgepairs_weight > 0 and self.edgepairs_select_lookback > 0
+            else ""
+        )
+        factor = (
+            f" factor={self.factor_lookback}@{self.factor_weight:.2f}"
+            f"z{self.factor_entry_z:.2f}"
+            f"{'+algo' if self.factor_include_algo else ''}"
+            if self.factor_weight > 0 and self.factor_lookback > 0
             else ""
         )
         adapt = (
@@ -212,7 +227,7 @@ class Params:
             f"lb={'/'.join(map(str, self.lookbacks))} w={w} "
             f"band={self.rebalance_band:.3f} algo={self.algo_dollar_limit:.0f}"
             f"{clip}{mom}{regime}{ema}{xs}{pairs}{algo_scale}{algo_hedge}"
-            f"{ols}{mpairs}{leadlag}{edgepairs}{adapt}{asym}{vt}"
+            f"{ols}{mpairs}{leadlag}{edgepairs}{factor}{adapt}{asym}{vt}"
         )
 
 
@@ -341,6 +356,13 @@ def _leadlag_signal(daily_returns: np.ndarray, params: Params) -> np.ndarray:
             corr = np.linalg.solve(gram, corr)
         except np.linalg.LinAlgError:
             corr = np.linalg.pinv(gram) @ corr
+    if params.leadlag_stable_halves and lb >= 2 * params.leadlag_min_obs:
+        split = lb // 2
+        corr_a = np.dot(leader_z[:, :split], follower_z[:, :split].T) / split
+        corr_b = np.dot(leader_z[:, split:], follower_z[:, split:].T) / (lb - split)
+        same_sign = corr_a * corr_b > 0.0
+        stable_mag = np.minimum(np.abs(corr_a), np.abs(corr_b))
+        corr = np.sign(corr) * stable_mag * same_sign
     corr[~valid_leader, :] = 0.0
     corr[:, ~valid_follower] = 0.0
     np.fill_diagonal(corr, 0.0)
@@ -457,6 +479,35 @@ def _edgepairs_signal(
     return np.clip(sig / m, -params.signal_clip_short, params.signal_clip_long)
 
 
+def _factor_residual_signal(log_prices: np.ndarray, params: Params) -> np.ndarray:
+    """ETF-style residual: each instrument vs a rolling synthetic market basket."""
+    nins, nt = log_prices.shape
+    lb = min(params.factor_lookback, nt)
+    if lb < 5:
+        return np.zeros(nins)
+
+    sig = np.zeros(nins)
+    window = log_prices[:, -lb:]
+    tradable = range(nins) if params.factor_include_algo else range(1, nins)
+    market = np.mean(window[1:, :], axis=0)
+    m_mu = float(market.mean())
+    mc = market - m_mu
+    denom = float(mc @ mc) + params.factor_beta_ridge
+
+    for i in tradable:
+        y = window[i, :]
+        y_mu = float(y.mean())
+        beta = float(mc @ (y - y_mu)) / denom
+        alpha = y_mu - beta * m_mu
+        spread = y - (alpha + beta * market)
+        z = spread_z(spread, lb)
+        if abs(z) < params.factor_entry_z:
+            continue
+        sig[i] = -float(np.clip(z, -params.signal_clip_short, params.signal_clip_long))
+
+    return sig
+
+
 def _reversal_signal(prc_so_far: np.ndarray, params: Params) -> np.ndarray:
     """Vol-standardised multi-horizon reversal (+ optional momentum) signal."""
     nins, nt = prc_so_far.shape
@@ -535,6 +586,8 @@ def strategy_positions(
             params.edgepairs_select_lookback + 1,
             params.edgepairs_fit_lookback,
         )
+    if params.factor_weight > 0 and params.factor_lookback > 0:
+        longest = max(longest, params.factor_lookback)
     if params.adaptive_band_vol_lb > 0:
         longest = max(longest, params.adaptive_band_vol_lb)
     min_days = longest + 1 if params.signal_ema_alpha < 1.0 else longest
@@ -575,6 +628,8 @@ def strategy_positions(
         )
         if params.edgepairs_prefix:
             need = max(need, nt - 1)
+    if params.factor_weight > 0 and params.factor_lookback > 0:
+        need = max(need, params.factor_lookback)
     if params.adaptive_band_vol_lb > 0:
         need = max(need, params.adaptive_band_vol_lb)
     if params.vol_target_lookback > 0:
@@ -642,6 +697,15 @@ def strategy_positions(
         if np.any(np.abs(ep) > VOLATILITY_FLOOR):
             signal = np.clip(
                 signal + params.edgepairs_weight * ep,
+                -params.signal_clip_short,
+                params.signal_clip_long,
+            )
+
+    if params.factor_weight > 0 and params.factor_lookback > 0:
+        fs = _factor_residual_signal(log_prices, params)
+        if np.any(np.abs(fs) > VOLATILITY_FLOOR):
+            signal = np.clip(
+                signal + params.factor_weight * fs,
                 -params.signal_clip_short,
                 params.signal_clip_long,
             )

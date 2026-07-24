@@ -107,6 +107,9 @@ def infer_warmup_days(module_name: str) -> int:
             int(const("EDGEPAIRS_FIT_LOOKBACK", 0)),
         )
 
+    if float(const("FACTOR_WEIGHT", 0.0)) > 0 and int(const("FACTOR_LOOKBACK", 0)) > 0:
+        longest = max(longest, int(const("FACTOR_LOOKBACK", 0)))
+
     return longest
 
 

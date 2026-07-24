@@ -24,10 +24,11 @@ LEADLAG_TOP_K = 2
 LEADLAG_ENTRY_Z = 0.42
 LEADLAG_MIN_CORR = 0.0
 LEADLAG_PREFIX = True
+LEADLAG_SHRINK = 0.0092
 LEADLAG_POWER = 1.25
 EDGEPAIRS_SELECT_LOOKBACK = 330
-EDGEPAIRS_FIT_LOOKBACK = 20
-EDGEPAIRS_WEIGHT = 0.80
+EDGEPAIRS_FIT_LOOKBACK = 30
+EDGEPAIRS_WEIGHT = 1.0
 EDGEPAIRS_TOP_K = 5
 EDGEPAIRS_ENTRY_Z = 1.0
 EDGEPAIRS_MIN_CORR = 0.25
@@ -35,6 +36,11 @@ EDGEPAIRS_PREFIX = True
 EDGEPAIRS_INCLUDE_ALGO = False
 EDGEPAIRS_TREND = False
 EDGEPAIRS_BETA_RIDGE = 1e-6
+FACTOR_LOOKBACK = 20
+FACTOR_WEIGHT = 0.08
+FACTOR_ENTRY_Z = 1.30
+FACTOR_INCLUDE_ALGO = False
+FACTOR_BETA_RIDGE = 1e-6
 ADAPTIVE_BAND_VOL_LB = 10
 ADAPTIVE_BAND_SCALE = 2.5
 VOL_TARGET_LOOKBACK = 20
@@ -152,6 +158,8 @@ def _leadlag_signal(daily_returns):
     latest_z[~valid_leader] = 0.0
 
     weights = corr.copy()
+    if LEADLAG_SHRINK > 0:
+        weights = np.sign(weights) * np.maximum(np.abs(weights) - LEADLAG_SHRINK, 0.0)
     if LEADLAG_POWER != 1.0:
         weights = np.sign(weights) * (np.abs(weights) ** LEADLAG_POWER)
     abs_weights = np.abs(weights)
@@ -249,6 +257,35 @@ def _edgepairs_signal(log_prices, daily_returns):
     return np.clip(sig / max_abs, -1.0, 1.0)
 
 
+def _factor_residual_signal(log_prices):
+    """ETF-style residual: each instrument versus a rolling synthetic basket."""
+    nins, nt = log_prices.shape
+    lb = min(FACTOR_LOOKBACK, nt)
+    if lb < 5:
+        return np.zeros(nins)
+
+    sig = np.zeros(nins)
+    window = log_prices[:, -lb:]
+    tradable = range(nins) if FACTOR_INCLUDE_ALGO else range(1, nins)
+    market = np.mean(window[1:, :], axis=0)
+    m_mu = float(market.mean())
+    mc = market - m_mu
+    denom = float(mc @ mc) + FACTOR_BETA_RIDGE
+
+    for i in tradable:
+        y = window[i, :]
+        y_mu = float(y.mean())
+        beta = float(mc @ (y - y_mu)) / denom
+        alpha = y_mu - beta * m_mu
+        spread = y - (alpha + beta * market)
+        z = _spread_z(spread, lb)
+        if abs(z) < FACTOR_ENTRY_Z:
+            continue
+        sig[i] = -float(np.clip(z, -1.0, 1.0))
+
+    return sig
+
+
 def getMyPosition(prcSoFar):
     global _current_positions, _last_history
 
@@ -269,6 +306,8 @@ def getMyPosition(prcSoFar):
             EDGEPAIRS_SELECT_LOOKBACK + 1,
             EDGEPAIRS_FIT_LOOKBACK,
         )
+    if FACTOR_WEIGHT > 0 and FACTOR_LOOKBACK > 0:
+        longest_lookback = max(longest_lookback, FACTOR_LOOKBACK)
 
     same_history = _last_history.shape == prcSoFar.shape and np.array_equal(
         _last_history,
@@ -336,6 +375,11 @@ def getMyPosition(prcSoFar):
         edgepairs_signal = _edgepairs_signal(log_prices, daily_returns)
         if np.any(np.abs(edgepairs_signal) > VOLATILITY_FLOOR):
             signal = np.clip(signal + EDGEPAIRS_WEIGHT * edgepairs_signal, -1.0, 1.0)
+
+    if FACTOR_WEIGHT > 0 and FACTOR_LOOKBACK > 0:
+        factor_signal = _factor_residual_signal(log_prices)
+        if np.any(np.abs(factor_signal) > VOLATILITY_FLOOR):
+            signal = np.clip(signal + FACTOR_WEIGHT * factor_signal, -1.0, 1.0)
 
     short_vol = daily_returns[:, -REGIME_VOL_SHORT:].std(axis=1)
     long_vol = daily_returns[:, -REGIME_VOL_LONG:].std(axis=1)

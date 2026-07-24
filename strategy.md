@@ -8,3 +8,14 @@ Strengthen algorithm by doing regularisation adn making sure its only the last t
 The second edge is a pairs edge if you pick the top pairs, they are consistent. However they need to be refitted.
 
 Avoid overfitting - currently the algothon webstie tests data on days 750 - 1000 and you are given data up to day 750. Look for trends.
+
+Highly prioritise consistent returns over volatility.
+
+There isnt really anything very observable in graphs for this thing, the main edge is in very small signatures that u trade a ton of.
+
+Scoring function: 
+![alt text](image.png)
+
+To know: each submission is evaluated against a growing reservoir of unseen data that increases in size daily.
+
+Some info from top scoring ppl: ![alt text](image-1.png)
