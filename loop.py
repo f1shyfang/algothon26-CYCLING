@@ -95,8 +95,8 @@ class Params:
     leadlag_min_corr: float = 0.0
     leadlag_prefix: bool = True
     leadlag_ridge: float = 0.0
-    leadlag_shrink: float = 0.0092
-    leadlag_power: float = 1.25
+    leadlag_shrink: float = 0.022
+    leadlag_power: float = 1.30
     leadlag_stable_halves: bool = False
     # Refit top-pairs edge: select stable correlated pairs, refit beta each day.
     edgepairs_select_lookback: int = 330  # 0 => disabled

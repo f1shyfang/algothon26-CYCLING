@@ -71,8 +71,8 @@ class TestMinimalCoreFloor(unittest.TestCase):
         self.assertEqual(p.leadlag_entry_z, 0.42)
         self.assertEqual(p.leadlag_min_corr, 0.0)
         self.assertTrue(p.leadlag_prefix)
-        self.assertEqual(p.leadlag_shrink, 0.0092)
-        self.assertEqual(p.leadlag_power, 1.25)
+        self.assertEqual(p.leadlag_shrink, 0.022)
+        self.assertEqual(p.leadlag_power, 1.30)
         self.assertFalse(p.leadlag_stable_halves)
         self.assertEqual(p.edgepairs_select_lookback, 330)
         self.assertEqual(p.edgepairs_fit_lookback, 30)
@@ -114,7 +114,7 @@ class TestMinimalCoreFloor(unittest.TestCase):
         self.assertAlmostEqual(cand.score, base.score, places=2)
 
     def test_floor_score_matches_production(self):
-        self.assertAlmostEqual(self.base.score, 715.35, places=2)
+        self.assertAlmostEqual(self.base.score, 708.71, places=2)
 
 
 class TestSimulateRange(unittest.TestCase):

@@ -1,4 +1,6 @@
 
+figuring out which pairs / combos of stocks have the most robust relationship, and wont fail in the future. 
+
 Investigate edge behaviours and look for alpha.
 
 Look at lag 1 cross correlations (one day delay). 
@@ -19,3 +21,7 @@ Scoring function:
 To know: each submission is evaluated against a growing reservoir of unseen data that increases in size daily.
 
 Some info from top scoring ppl: ![alt text](image-1.png)
+
+Currently the on-website pnl is still 200ish - lower than the eval.py - so check for overfit or not taking enough of the good pairs. 
+
+Did you find paramters for which the plotted pair of stock is stationary - watch out for there are some thats decreasing after day 750. 
